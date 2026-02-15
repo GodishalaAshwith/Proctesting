@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const AnswerSchema = new mongoose.Schema(
   {
@@ -68,4 +68,4 @@ AttemptSchema.index(
   { unique: false }
 );
 
-module.exports = mongoose.model("Attempt", AttemptSchema);
+export default mongoose.model("Attempt", AttemptSchema);

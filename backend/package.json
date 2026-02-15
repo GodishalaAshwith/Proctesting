@@ -1,6 +1,7 @@
 {
   "name": "backend",
   "version": "1.0.0",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -12,11 +13,13 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@langchain/google-genai": "^2.1.18",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
+    "langchain": "^1.2.24",
     "mongoose": "^8.11.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.10.1",
