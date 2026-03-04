@@ -89,6 +89,10 @@ export const updateExam = (id, payload) =>
   API.put(`/exams/${id}`, payload, localAuthHeader());
 export const deleteExam = (id) => API.delete(`/exams/${id}`, localAuthHeader());
 
+/** ---------------- AI ---------------- **/
+export const generateAIQuestions = (prompt) =>
+  API.post("/ai/generate-questions", { prompt }, localAuthHeader());
+
 /** ---------------- STUDENT ---------------- **/
 export const listAvailableExams = () =>
   API.get("/exams/available", localAuthHeader());
