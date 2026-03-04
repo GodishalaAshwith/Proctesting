@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createExam, generateAIQuestions, getExam, updateExam } from "../utils/api";
+import { createExam, generateAIQuestions, getExam, listMyExams, updateExam } from "../utils/api";
 
 // --- Import helpers ---
 // Simple CSV parser with quoted-field support
@@ -298,6 +298,12 @@ const ExamEditor = () => {
   const [aiQuestions, setAiQuestions] = useState([]);
   const [aiReplaceExisting, setAiReplaceExisting] = useState(false);
 
+  // Auto-fill from previous test state
+  const [autofillOpen, setAutofillOpen] = useState(false);
+  const [autofillExams, setAutofillExams] = useState([]);
+  const [autofillSearch, setAutofillSearch] = useState("");
+  const [autofillLoading, setAutofillLoading] = useState(false);
+
   useEffect(() => {
     const stored = localStorage.getItem("user");
     if (!stored) {
@@ -309,7 +315,16 @@ const ExamEditor = () => {
       navigate("/");
       return;
     }
-    if (isEdit) loadExam();
+    if (isEdit) {
+      loadExam();
+    } else {
+      // Load previous exams so faculty can auto-fill from one
+      setAutofillLoading(true);
+      listMyExams()
+        .then(({ data }) => setAutofillExams(Array.isArray(data) ? data : []))
+        .catch(() => setAutofillExams([]))
+        .finally(() => setAutofillLoading(false));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -622,6 +637,28 @@ const ExamEditor = () => {
     setAiError("");
   };
 
+  const applyAutofill = (exam) => {
+    const start = nowLocal();
+    const end = addMinsLocal(start, exam.durationMins || 60);
+    setForm({
+      title: exam.title || "",
+      description: exam.description || "",
+      durationMins: exam.durationMins || 60,
+      windowStart: start,
+      windowEnd: end,
+      assignment: {
+        college: exam.assignmentCriteria?.college || "",
+        year: exam.assignmentCriteria?.year || [],
+        department: exam.assignmentCriteria?.department || [],
+        section: exam.assignmentCriteria?.section || [],
+        semester: exam.assignmentCriteria?.semester || [],
+      },
+      questions: [emptyQuestion()],
+    });
+    setAutofillOpen(false);
+    setAutofillSearch("");
+  };
+
   const sampleCSV = `text,type,options,correct,points
 What is 2+2?,single,2 | 3 | 4 | 5,3,1
 Select prime numbers,mcq,2 | 3 | 4 | 5,"A,B",3
@@ -656,24 +693,41 @@ Points: 5`;
         <h1 className="text-3xl font-bold text-slate-900">
           {isEdit ? "Edit Exam" : "Create Exam"}
         </h1>
-        <button
-          onClick={() => navigate("/faculty/exams")}
-          className="inline-flex items-center gap-2 text-emerald-700 hover:text-emerald-800 hover:underline"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            className="w-4 h-4"
+        <div className="flex items-center gap-3">
+          {!isEdit && (
+            <button
+              type="button"
+              onClick={() => { setAutofillOpen(true); setAutofillSearch(""); }}
+              disabled={autofillLoading}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors text-sm font-medium disabled:opacity-60"
+              title="Copy settings from a previously created exam"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path fillRule="evenodd" d="M9.315 7.584C12.195 3.883 16.695 1.5 21.75 1.5a.75.75 0 0 1 .75.75c0 5.056-2.383 9.555-6.084 12.436A6.75 6.75 0 0 1 9.75 22.5a.75.75 0 0 1-.75-.75v-4.131A15.838 15.838 0 0 1 6.382 15H2.25a.75.75 0 0 1-.75-.75 6.75 6.75 0 0 1 7.815-6.666ZM15 6.75a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5Z" clipRule="evenodd" />
+                <path d="M5.26 17.242a.75.75 0 1 0-.897-1.203 5.243 5.243 0 0 0-2.05 5.022.75.75 0 0 0 .625.627 5.243 5.243 0 0 0 5.022-2.051.75.75 0 1 0-1.202-.897 3.744 3.744 0 0 1-3.008 1.51c0-1.23.592-2.323 1.51-3.008Z" />
+              </svg>
+              {autofillLoading ? "Loading…" : "Auto-fill from previous"}
+            </button>
+          )}
+          <button
+            onClick={() => navigate("/faculty/exams")}
+            className="inline-flex items-center gap-2 text-emerald-700 hover:text-emerald-800 hover:underline"
           >
-            <path
-              fillRule="evenodd"
-              d="M9.53 3.22a.75.75 0 0 1 0 1.06L4.56 9.25H21a.75.75 0 0 1 0 1.5H4.56l4.97 4.97a.75.75 0 1 1-1.06 1.06l-6.25-6.25a.75.75 0 0 1 0-1.06l6.25-6.25a.75.75 0 0 1 1.06 0Z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Back to list
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="w-4 h-4"
+            >
+              <path
+                fillRule="evenodd"
+                d="M9.53 3.22a.75.75 0 0 1 0 1.06L4.56 9.25H21a.75.75 0 0 1 0 1.5H4.56l4.97 4.97a.75.75 0 1 1-1.06 1.06l-6.25-6.25a.75.75 0 0 1 0-1.06l6.25-6.25a.75.75 0 0 1 1.06 0Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Back to list
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -1652,6 +1706,120 @@ Points: 5`;
                       : "Add to Form"}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Auto-fill from previous test Modal ── */}
+      {autofillOpen && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/60"
+            onClick={() => setAutofillOpen(false)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+
+              {/* Header */}
+              <div className="px-6 py-4 flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500">
+                <div className="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white">
+                    <path fillRule="evenodd" d="M9.315 7.584C12.195 3.883 16.695 1.5 21.75 1.5a.75.75 0 0 1 .75.75c0 5.056-2.383 9.555-6.084 12.436A6.75 6.75 0 0 1 9.75 22.5a.75.75 0 0 1-.75-.75v-4.131A15.838 15.838 0 0 1 6.382 15H2.25a.75.75 0 0 1-.75-.75 6.75 6.75 0 0 1 7.815-6.666ZM15 6.75a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5Z" clipRule="evenodd" />
+                    <path d="M5.26 17.242a.75.75 0 1 0-.897-1.203 5.243 5.243 0 0 0-2.05 5.022.75.75 0 0 0 .625.627 5.243 5.243 0 0 0 5.022-2.051.75.75 0 1 0-1.202-.897 3.744 3.744 0 0 1-3.008 1.51c0-1.23.592-2.323 1.51-3.008Z" />
+                  </svg>
+                  <h3 className="text-lg font-bold text-white">Auto-fill from previous test</h3>
+                </div>
+                <button
+                  onClick={() => setAutofillOpen(false)}
+                  className="text-white/70 hover:text-white transition-colors"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="px-5 pt-4 pb-2">
+                <p className="text-sm text-slate-500 mb-3">
+                  Select a previous exam. Its title, description, duration, assignment criteria, and questions will be copied into this form. The schedule window will be reset.
+                </p>
+                <input
+                  type="text"
+                  placeholder="Search by title…"
+                  value={autofillSearch}
+                  onChange={(e) => setAutofillSearch(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white text-sm"
+                />
+              </div>
+
+              {/* Exam list */}
+              <div className="px-5 pb-5 flex-1 overflow-y-auto space-y-2 mt-1">
+                {(() => {
+                  const filtered = autofillExams.filter((e) =>
+                    (e.title || "").toLowerCase().includes(autofillSearch.toLowerCase())
+                  );
+                  if (!autofillExams.length) {
+                    return (
+                      <div className="text-center py-10 text-slate-400 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 mx-auto mb-2 opacity-40">
+                          <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625Z" />
+                          <path d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z" />
+                        </svg>
+                        No previous exams found.
+                      </div>
+                    );
+                  }
+                  if (!filtered.length) {
+                    return (
+                      <div className="text-center py-8 text-slate-400 text-sm">
+                        No exams match &ldquo;{autofillSearch}&rdquo;.
+                      </div>
+                    );
+                  }
+                  return filtered.map((exam) => (
+                    <button
+                      key={exam._id}
+                      type="button"
+                      onClick={() => applyAutofill(exam)}
+                      className="w-full text-left rounded-xl border border-slate-200 bg-slate-50 hover:border-amber-400 hover:bg-amber-50 transition-colors px-4 py-3 group"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-900 truncate group-hover:text-amber-800">
+                            {exam.title || "(Untitled)"}
+                          </p>
+                          {exam.description && (
+                            <p className="text-xs text-slate-500 truncate mt-0.5">{exam.description}</p>
+                          )}
+                          <div className="flex flex-wrap gap-3 mt-1.5">
+                            <span className="text-xs text-slate-400">
+                              ⏱ {exam.durationMins || 60} mins
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              📋 {exam.questions?.length ?? 0} question{(exam.questions?.length ?? 0) !== 1 ? "s" : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-slate-300 group-hover:text-amber-500 shrink-0 mt-1">
+                          <path fillRule="evenodd" d="M16.72 7.72a.75.75 0 0 1 1.06 0l3.75 3.75a.75.75 0 0 1 0 1.06l-3.75 3.75a.75.75 0 1 1-1.06-1.06l2.47-2.47H3a.75.75 0 0 1 0-1.5h16.19l-2.47-2.47a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                    </button>
+                  ));
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAutofillOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
