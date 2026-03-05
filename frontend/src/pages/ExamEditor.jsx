@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { createExam, generateAIQuestions, getExam, listMyExams, updateExam } from "../utils/api";
+import MarkdownRenderer from "../components/MarkdownRenderer";
 
 // --- Import helpers ---
 // Simple CSV parser with quoted-field support
@@ -1467,7 +1468,7 @@ Points: 5`;
                       <div className="text-xs uppercase tracking-wide text-slate-500">
                         {q.type} • {q.points} pt{q.points > 1 ? "s" : ""}
                       </div>
-                      <div className="text-slate-900 font-medium">{q.text}</div>
+                      <div className="text-slate-900 font-medium overflow-x-auto"><MarkdownRenderer content={q.text} /></div>
                       {q.options?.length ? (
                         <ul className="mt-1 text-sm text-slate-700 list-disc pl-5">
                           {q.options.map((o, oi) => (
@@ -1479,7 +1480,7 @@ Points: 5`;
                                   : ""
                               }
                             >
-                              {o}
+                              <span className="flex-1 overflow-x-auto inline-block align-top"><MarkdownRenderer content={o} /></span>
                             </li>
                           ))}
                         </ul>
@@ -1640,7 +1641,7 @@ Points: 5`;
                             </span>
                             <span className="text-xs text-slate-400">Q{i + 1}</span>
                           </div>
-                          <p className="text-sm font-medium text-slate-900">{q.text}</p>
+                          <div className="text-sm font-medium text-slate-900 overflow-x-auto"><MarkdownRenderer content={q.text} /></div>
                           {q.options && q.options.length > 0 && (
                             <ul className="space-y-1">
                               {q.options.map((opt, oi) => (
@@ -1652,8 +1653,8 @@ Points: 5`;
                                       : "text-slate-600"
                                   }`}
                                 >
-                                  <span className="font-mono w-4 shrink-0">{String.fromCharCode(65 + oi)}.</span>
-                                  {opt}
+                                  <span className="font-mono w-4 shrink-0 self-start mt-0.5">{String.fromCharCode(65 + oi)}.</span>
+                                  <div className="flex-1 overflow-x-auto"><MarkdownRenderer content={opt} /></div>
                                   {(q.correctAnswers || []).includes(oi) && (
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 ml-auto shrink-0 text-emerald-600">
                                       <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12Zm13.36-1.814a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clipRule="evenodd" />

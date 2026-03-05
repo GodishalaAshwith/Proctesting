@@ -6,6 +6,7 @@ import {
   startAttempt,
   submitAttempt,
 } from "../utils/api";
+import MarkdownRenderer from "../components/MarkdownRenderer";
 
 const RETURN_TIMEOUT_SECONDS = 10;
 const AUTOSAVE_MS = 3000;
@@ -662,9 +663,10 @@ const ExamRunner = () => {
         <div className="space-y-4">
           {exam.questions.map((q, idx) => (
             <div key={idx} className="bg-white rounded shadow p-4">
-              <div className="font-medium mb-2">
-                Q{idx + 1}. {q.text}{" "}
-                <span className="text-sm text-gray-500">({q.points} pts)</span>
+              <div className="font-medium mb-2 flex items-start gap-2">
+                <span className="mt-0.5">Q{idx + 1}.</span>
+                <div className="flex-1 overflow-x-auto"><MarkdownRenderer content={q.text} /></div>
+                <span className="text-sm text-gray-500 shrink-0 mt-0.5">({q.points} pts)</span>
               </div>
               {q.type === "text" && (
                 <textarea
@@ -686,7 +688,7 @@ const ExamRunner = () => {
                         onChange={() => handleChange(idx, oi)}
                         disabled={state.submitted}
                       />{" "}
-                      <span className="ml-2">{opt}</span>
+                      <div className="ml-2 flex-1 overflow-x-auto inline-block align-top"><MarkdownRenderer content={opt} /></div>
                     </label>
                   ))}
                 </div>
@@ -715,7 +717,7 @@ const ExamRunner = () => {
                           );
                         }}
                       />{" "}
-                      <span className="ml-2">{opt}</span>
+                      <div className="ml-2 flex-1 overflow-x-auto inline-block align-top"><MarkdownRenderer content={opt} /></div>
                     </label>
                   ))}
                 </div>

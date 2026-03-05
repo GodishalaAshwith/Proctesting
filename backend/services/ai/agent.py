@@ -3,17 +3,14 @@ import json
 from pydantic import BaseModel, Field
 from typing import List
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 import os
 from dotenv import load_dotenv
 
 # Load .env from backend folder
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-# Ensure the API key is available
-if not os.environ.get("GOOGLE_API_KEY"):
-    raise ValueError("GOOGLE_API_KEY environment variable is not set.")
-
+# Google API Key check removed - local model in use
 
 # Define Pydantic models for structured output
 class Intent(BaseModel):
@@ -35,7 +32,7 @@ def analyze_intent(llm, prompt: str) -> Intent:
     structured_llm = llm.with_structured_output(Intent)
     
     chat_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an academic intent analyzer.\nExtract structured information from the input.\nReturn accurate JSON mapping to the requested schema."),
+        ("system", "You are an academic intent analyzer.\nExtract structured information from the input.\nIf multiple topics are requested (e.g. '5 trig and 5 bio'), COMBINE them into a single string for `topic`.\nCRITICALLY: set `numQuestions` to the TOTAL sum exactly requested (e.g. 5 + 5 = 10).\nReturn accurate JSON mapping to the requested schema."),
         ("human", "{prompt}")
     ])
     
@@ -46,7 +43,7 @@ def generate_questions(llm, intent: Intent, original_prompt: str) -> QuestionsRe
     structured_llm = llm.with_structured_output(QuestionsResult)
     
     chat_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an academic question generator.\nGenerate questions following the exact constraints from the User's Original Prompt. Distribute exactly as requested."),
+        ("system", "You are an academic question generator.\nGenerate questions following the exact constraints from the User's Original Prompt. Distribute exact counts per topic as requested.\nYou MUST generate EXACTLY {numQuestions} questions in total. Do not generate more or less."),
         ("human", "User's Original Prompt: {original_prompt}\nParsed Topic: {topic}\nDifficulty: {difficulty}\nType: {questionType}\nTotal Number of Questions: {numQuestions}")
     ])
     
@@ -67,9 +64,9 @@ def main():
     prompt = sys.argv[1]
     
     try:
-        # Initialize Gemini model
-        llm_intent = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.2)
-        llm_gen = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.7)
+        # Initialize Ollama model
+        llm_intent = ChatOllama(model="llama3.2:latest", temperature=0.2)
+        llm_gen = ChatOllama(model="llama3.2:latest", temperature=0.7)
         
         # Run agent pipeline
         intent = analyze_intent(llm_intent, prompt)
