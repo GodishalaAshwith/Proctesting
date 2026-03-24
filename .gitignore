@@ -18,3 +18,6 @@ python_microservice/.ruff_cache/
 python_microservice/.coverage
 python_microservice/.env
 python_microservice/.env.*
+backend/package-lock.json
+frontend/package-lock.json
+backend/package-lock.json
