@@ -11,24 +11,30 @@ export function runAgentPipeline(input) {
     const pythonScript = path.join(__dirname, "agent.py");
     const escapedInput = input.replace(/"/g, '\\"'); // escape double quotes
     
-    // Use python executable (or python3 on some systems)
-    const command = `python "${pythonScript}" "${escapedInput}"`;
+    // Use python executable from the local virtual environment
+    const pythonExecutable = path.join(__dirname, "..", "..", "venv", "Scripts", "python.exe");
+    const command = `"${pythonExecutable}" "${pythonScript}" "${escapedInput}"`;
     
     exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error("Error executing Python script:", stderr);
-        return reject(error);
-      }
-      
+      // Try parsing stdout first, as Python might have outputted a clean JSON error before exiting
       try {
-        const result = JSON.parse(stdout);
-        if (result.error) {
-           return reject(new Error(result.error));
+        if (stdout && stdout.trim()) {
+          const result = JSON.parse(stdout);
+          if (result.error) {
+             return reject(new Error(result.error));
+          }
+          if (!error) {
+             return resolve(result);
+          }
         }
-        resolve(result);
       } catch (parseError) {
         console.error("Failed to parse python output:", stdout);
-        reject(parseError);
+      }
+
+      // If we reach here, it either wasn't valid JSON or didn't have a clean error
+      if (error) {
+        console.error("Error executing Python script:", stderr);
+        return reject(new Error("AI Agent crashed unexpectedly. Please check the backend logs."));
       }
     });
   });
