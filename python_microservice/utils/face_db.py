@@ -407,6 +407,144 @@ def list_students(db_path=DB_PATH):
         cursor.execute("SELECT student_id FROM student_faces ORDER BY student_id")
         return [row["student_id"] for row in cursor.fetchall()]
 
+def proctor_check(frame_image, student_id, run_reverify=False, threshold=DEFAULT_VERIFY_THRESHOLD, db_path=DB_PATH):
+    """
+    Single proctoring snapshot check. Called every few seconds during an exam.
+
+    Checks
+    ------
+    1. Face count  — always runs
+         0 faces  -> "no_face"
+         >1 faces -> "multiple_faces"
+         1 face   -> "ok" (or proceeds to reverify if requested)
+
+    2. Re-verification — runs only when run_reverify=True
+         Compares the live face embedding against the registered one.
+         Triggers "identity_mismatch" if distance >= threshold.
+
+    Parameters
+    ----------
+    frame_image  : file path (str) OR BGR numpy array from cv2
+    student_id   : registered student to check against
+    run_reverify : bool — whether to run identity check this cycle
+    threshold    : Euclidean distance cut-off (default 0.55)
+    db_path      : SQLite DB path
+
+    Returns
+    -------
+    dict:
+        status      : "ok" | "no_face" | "multiple_faces" | "identity_mismatch" | "error"
+        face_count  : int (always present)
+        run_reverify: bool (echoed)
+        confidence  : float | None  (only when reverify ran and succeeded)
+        distance    : float | None  (only when reverify ran and succeeded)
+        message     : str | None    (only on error or mismatch detail)
+    """
+
+    # --- Load and preprocess image ---
+    if isinstance(frame_image, str):
+        rgb = load_image_rgb(frame_image)
+        if rgb is None:
+            return {"status": "error", "face_count": 0, "run_reverify": run_reverify, "message": "Could not read image."}
+    elif isinstance(frame_image, np.ndarray):
+        if frame_image.ndim == 2:
+            rgb = cv2.cvtColor(frame_image, cv2.COLOR_GRAY2RGB)
+        elif frame_image.shape[2] == 4:
+            rgb = cv2.cvtColor(frame_image[:, :, :3], cv2.COLOR_BGR2RGB)
+        else:
+            rgb = cv2.cvtColor(frame_image, cv2.COLOR_BGR2RGB)
+        if rgb.dtype != np.uint8:
+            rgb = (rgb / rgb.max() * 255).astype(np.uint8)
+        rgb = np.array(PILImage.fromarray(rgb).convert("RGB"), dtype=np.uint8)
+    else:
+        return {"status": "error", "face_count": 0, "run_reverify": run_reverify, "message": "Invalid image input type."}
+
+    rgb = preprocess_image(rgb)
+
+    # --- Step 1: Face count check ---
+    face_locations = face_recognition.face_locations(rgb, model="hog")
+    face_count = len(face_locations)
+
+    if face_count == 0:
+        logger.info("proctor_check | student=%s | no_face", student_id)
+        return {
+            "status": "no_face",
+            "face_count": 0,
+            "run_reverify": run_reverify,
+            "confidence": None,
+            "distance": None,
+        }
+
+    if face_count > 1:
+        logger.info("proctor_check | student=%s | multiple_faces=%d", student_id, face_count)
+        return {
+            "status": "multiple_faces",
+            "face_count": face_count,
+            "run_reverify": run_reverify,
+            "confidence": None,
+            "distance": None,
+        }
+
+    # --- Step 2: Re-verification (optional) ---
+    if not run_reverify:
+        return {
+            "status": "ok",
+            "face_count": 1,
+            "run_reverify": False,
+            "confidence": None,
+            "distance": None,
+        }
+
+    # Fetch stored embedding
+    with get_db(db_path) as (_, cursor):
+        cursor.execute(
+            "SELECT embedding FROM student_faces WHERE student_id = ?",
+            (student_id,),
+        )
+        row = cursor.fetchone()
+
+    if row is None:
+        return {
+            "status": "error",
+            "face_count": 1,
+            "run_reverify": True,
+            "message": f"No registered face found for '{student_id}'.",
+            "confidence": None,
+            "distance": None,
+        }
+
+    stored_embedding = bytes_to_embedding(row["embedding"])
+
+    live_encodings = face_recognition.face_encodings(rgb, face_locations)
+    if not live_encodings:
+        return {
+            "status": "error",
+            "face_count": 1,
+            "run_reverify": True,
+            "message": "Could not compute embedding from live frame.",
+            "confidence": None,
+            "distance": None,
+        }
+
+    distance = float(np.linalg.norm(stored_embedding - live_encodings[0]))
+    confidence = round(max(0.0, 1.0 - distance), 4)
+    is_match = distance < threshold
+
+    status = "ok" if is_match else "identity_mismatch"
+
+    logger.info(
+        "proctor_check | student=%s | reverify | distance=%.4f | match=%s",
+        student_id, distance, is_match,
+    )
+
+    return {
+        "status": status,
+        "face_count": 1,
+        "run_reverify": True,
+        "confidence": confidence,
+        "distance": round(distance, 4),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Quick smoke-test (run this file directly)
