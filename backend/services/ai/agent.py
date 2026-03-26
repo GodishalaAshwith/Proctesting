@@ -31,17 +31,35 @@ class Question(BaseModel):
 class QuestionsResult(BaseModel):
     questions: List[Question]
 
-def get_or_build_vector_store():
+class TopicsResult(BaseModel):
+    topics: List[str] = Field(description="A list of 5-10 main educational topics covered in this text snippet.")
+
+def extract_topics(llm, text_sample: str) -> List[str]:
+    structured_llm = llm.with_structured_output(TopicsResult)
+    chat_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an academic topic extractor. Read the provided text snippet and extract a list of major educational concepts or topics it covers. Return ONLY an accurate JSON object matching the schema."),
+        ("human", "{text}")
+    ])
+    try:
+        chain = chat_prompt | structured_llm
+        result = chain.invoke({"text": text_sample})
+        return result.topics
+    except Exception as e:
+        print(f"Topic extraction failed: {e}", file=sys.stderr)
+        return []
+
+def get_or_build_vector_store(llm_intent):
     # Paths for textbooks and the FAISS index
     base_dir = os.path.dirname(os.path.abspath(__file__))
     backend_dir = os.path.join(base_dir, "..", "..")
     textbooks_dir = os.path.join(backend_dir, "textbooks")
     faiss_index_dir = os.path.join(backend_dir, "faiss_index")
+    topics_index_path = os.path.join(faiss_index_dir, "topics_index.json")
     
     embeddings = OllamaEmbeddings(model="all-minilm", base_url="http://127.0.0.1:11434")
     
-    # Try loading existing FAISS index
-    if os.path.exists(faiss_index_dir):
+    # Try loading existing FAISS index AND topics index
+    if os.path.exists(faiss_index_dir) and os.path.exists(topics_index_path):
         try:
             return FAISS.load_local(faiss_index_dir, embeddings, allow_dangerous_deserialization=True)
         except Exception as e:
@@ -51,23 +69,41 @@ def get_or_build_vector_store():
 
     # Build the FAISS index from the documents
     os.makedirs(textbooks_dir, exist_ok=True)
+    os.makedirs(faiss_index_dir, exist_ok=True)
     documents = []
+    topics_index = {}
     
     for root, _, files in os.walk(textbooks_dir):
         for file in files:
             file_path = os.path.join(root, file)
+            file_docs = []
             try:
                 if file.endswith('.pdf'):
                     doc_loader = PyPDFLoader(file_path)
-                    documents.extend(doc_loader.load())
+                    file_docs = doc_loader.load()
                 elif file.endswith('.txt') or file.endswith('.md'):
                     doc_loader = TextLoader(file_path, encoding='utf-8')
-                    documents.extend(doc_loader.load())
+                    file_docs = doc_loader.load()
+                
+                if file_docs:
+                    documents.extend(file_docs)
+                    # Extract topics from the first 5000 characters
+                    full_text = "\n".join([d.page_content for d in file_docs])
+                    sample_text = full_text[:5000]
+                    topics = extract_topics(llm_intent, sample_text)
+                    topics_index[file] = topics
+                    print(f"DEBUG: Extracted topics for {file}: {topics}", file=sys.stderr)
             except Exception as e:
                 print(f"Error loading {file_path}: {e}", file=sys.stderr)
     
     if not documents:
         return None  # No documents loaded
+        
+    try:
+        with open(topics_index_path, "w") as f:
+            json.dump(topics_index, f)
+    except Exception as e:
+        print(f"Error saving topics index: {e}", file=sys.stderr)
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(documents)
@@ -155,11 +191,39 @@ def main():
         llm_gen = ChatOllama(model="llama3.2:latest", temperature=0.7, base_url="http://127.0.0.1:11434")
         
         # Build or load vector store
-        vector_store = get_or_build_vector_store()
+        vector_store = get_or_build_vector_store(llm_intent)
         context_str = ""
         
         # Ensure intent is parsed
         intent = analyze_intent(llm_intent, prompt)
+        
+        # --- FAST FAIL LOGIC: Check against Table of Contents ---
+        topics_index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "faiss_index", "topics_index.json")
+        if os.path.exists(topics_index_path) and intent.topic.lower() not in ["general", "general content", "various", "any"]:
+            try:
+                with open(topics_index_path, "r") as f:
+                    master_topics = json.load(f)
+                
+                all_topics = [t for topics_list in master_topics.values() for t in topics_list]
+                
+                if all_topics:
+                    toc_str = ", ".join(all_topics)
+                    toc_prompt = ChatPromptTemplate.from_messages([
+                        ("system", "You are a fast Table of Contents validator. Read the Available Topics list, then determine if the Requested Topic is logically covered or related to ANY of them. Say YES if it is. Say NO if the requested topic is completely absent from the Available Topics list. Answer strictly YES or NO."),
+                        ("human", f"Available Topics: {toc_str}\nRequested Topic: {intent.topic}")
+                    ])
+                    # Non-structured simple LLM call for ultra-low latency
+                    result = llm_intent.invoke(toc_prompt.format())
+                    answer = result.content.strip().lower()
+                    print(f"DEBUG TOC CHECK: {answer}", file=sys.stderr)
+                    
+                    if not (answer.startswith("yes") or "yes" in answer):
+                        print(json.dumps({"error": f"Topic '{intent.topic}' is not present in our datastore's Table of Contents. Please add relevant textbooks before generating questions."}))
+                        sys.exit(0)
+                        
+            except Exception as e:
+                print(f"Failed to read or validate against topics index: {e}", file=sys.stderr)
+        # --- END FAST FAIL LOGIC ---
         
         # Retrieve context from textbooks if vector store exists
         if vector_store is not None:
