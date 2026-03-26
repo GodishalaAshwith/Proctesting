@@ -24,11 +24,11 @@ router.post("/generate-questions", async (req, res) => {
     }
     const result = await runAgentPipeline(prompt.trim());
     res.json(result);
-  } catch (error) {
+    } catch (error) {
     console.error("AI generation error:", error);
     res
       .status(500)
-      .json({ error: "Failed to generate questions. Please try again." });
+      .json({ error: error.message || "Failed to generate questions. Please try again." });
   }
 });
 
