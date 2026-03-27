@@ -127,3 +127,32 @@ export const grantRetake = (examId, studentId, count = 1) =>
 
 /** ---------------- CONTACT ---------------- **/
 export const sendContactMessage = (payload) => API.post(`/contact`, payload);
+
+/** ---------------- FACE PROCTORING ---------------- **/
+/**
+ * Register the student's face before the exam starts.
+ * @param {string} studentId - the student's roll number
+ * @param {Blob} imageBlob   - JPEG blob captured from webcam
+ */
+export const registerFace = (studentId, imageBlob) => {
+  const form = new FormData();
+  form.append("image", imageBlob, "capture.jpg");
+  return API.post(`/face/register/${encodeURIComponent(studentId)}`, form, {
+    headers: { ...localAuthHeader().headers, "Content-Type": "multipart/form-data" },
+  });
+};
+
+/**
+ * Periodic proctoring check during an exam.
+ * @param {string} studentId - the student's roll number
+ * @param {Blob} imageBlob   - JPEG blob from webcam snapshot
+ * @returns {{ violation_type: string, match: boolean, confidence: number, face_count: number }}
+ */
+export const checkFace = (studentId, imageBlob) => {
+  const form = new FormData();
+  form.append("image", imageBlob, "frame.jpg");
+  return API.post(`/face/check/${encodeURIComponent(studentId)}`, form, {
+    headers: { ...localAuthHeader().headers, "Content-Type": "multipart/form-data" },
+  });
+};
+

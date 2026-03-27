@@ -9,6 +9,7 @@ import attemptRoutes from "./routes/attempts.js";
 import miscRoutes from "./routes/misc.js";
 import { scheduleDailyRunner } from "./scheduler/promotion.js";
 import aiRoutes from "./routes/ai.routes.js";
+import faceRoutes from "./routes/face.routes.js";
 
 
 
@@ -34,6 +35,7 @@ app.use(express.json()); // Parse JSON body
 
 // Routes
 app.use("/api/ai", aiRoutes);
+app.use("/api/face", faceRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/exams", examRoutes);
