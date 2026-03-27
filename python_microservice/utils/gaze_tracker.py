@@ -147,9 +147,10 @@ class GazeSession:
         self.offence_count      = 0
         self.total_away_seconds = 0.0
         self.events             = []
-        self._looking_away      = False
-        self._away_started_at   = None
-        self._current_direction = "center"
+        self._looking_away        = False
+        self._away_started_at     = None
+        self._current_direction   = "center"
+        self._current_away_logged = False
 
         if MEDIAPIPE_AVAILABLE:
             self._mesh = _mp_face_mesh.FaceMesh(
@@ -186,17 +187,40 @@ class GazeSession:
         event_logged = False
 
         if looking_away and not self._looking_away:
+            # Transition: center → looking away — start the timer
             self._looking_away      = True
             self._away_started_at   = ts
             self._current_direction = gaze["direction"]
+            self._current_away_logged = False  # haven't logged this episode yet
+
+        elif looking_away and self._looking_away:
+            # Still looking away — update direction if changed
+            self._current_direction = gaze["direction"]
+
+            # If we've exceeded grace period and haven't logged this episode yet,
+            # log the offence NOW (don't wait until they look back)
+            ongoing_dur = ts - self._away_started_at
+            if ongoing_dur >= GRACE_PERIOD_S and not self._current_away_logged:
+                self.offence_count      += 1
+                self._current_away_logged = True
+                event_logged = True
+                logger.info(
+                    "gaze | student=%s | offence #%d (ongoing) | dir=%s | dur=%.1fs",
+                    self.student_id, self.offence_count,
+                    self._current_direction, ongoing_dur,
+                )
 
         elif not looking_away and self._looking_away:
+            # Transition: looking away → back to center — finalize the episode
             duration           = ts - self._away_started_at
             self._looking_away = False
 
             if duration >= GRACE_PERIOD_S:
-                self.offence_count      += 1
                 self.total_away_seconds += duration
+                # If we didn't already count this as an offence while it was ongoing
+                if not self._current_away_logged:
+                    self.offence_count += 1
+                    event_logged = True
                 self.events.append({
                     "type":           "gaze_away",
                     "direction":      self._current_direction,
@@ -204,12 +228,20 @@ class GazeSession:
                     "timestamp":      ts,
                     "offence_number": self.offence_count,
                 })
-                event_logged = True
                 logger.info(
-                    "gaze | student=%s | offence #%d | dir=%s | dur=%.1fs",
+                    "gaze | student=%s | offence #%d finalized | dir=%s | dur=%.1fs",
                     self.student_id, self.offence_count,
                     self._current_direction, duration,
                 )
+
+            self._current_away_logged = False
+
+        # Compute live stats including any ongoing away episode
+        live_away_s  = self.total_away_seconds
+        live_offence = self.offence_count
+        if self._looking_away and self._away_started_at is not None:
+            ongoing = ts - self._away_started_at
+            live_away_s += ongoing  # include current ongoing duration
 
         return {
             "status":        "ok",
@@ -217,9 +249,9 @@ class GazeSession:
             "direction":     gaze["direction"],
             "h_ratio":       gaze["h_ratio"],
             "v_ratio":       gaze["v_ratio"],
-            "offence_count": self.offence_count,
-            "total_away_s":  round(self.total_away_seconds, 2),
-            "penalty_score": round(self._penalty(), 2),
+            "offence_count": live_offence,
+            "total_away_s":  round(live_away_s, 2),
+            "penalty_score": round(self._penalty_live(ts), 2),
             "event_logged":  event_logged,
         }
 
@@ -228,6 +260,23 @@ class GazeSession:
             self._looking_away      = True
             self._away_started_at   = ts
             self._current_direction = "no_face"
+            self._current_away_logged = False
+        else:
+            # Still no face — check if we should log the offence
+            ongoing_dur = ts - self._away_started_at
+            if ongoing_dur >= GRACE_PERIOD_S and not self._current_away_logged:
+                self.offence_count += 1
+                self._current_away_logged = True
+                logger.info(
+                    "gaze | student=%s | offence #%d (no_face, ongoing) | dur=%.1fs",
+                    self.student_id, self.offence_count, ongoing_dur,
+                )
+
+        # Compute live stats including ongoing away episode
+        live_away_s = self.total_away_seconds
+        if self._looking_away and self._away_started_at is not None:
+            live_away_s += (ts - self._away_started_at)
+
         return {
             "status":        "no_face",
             "looking_away":  True,
@@ -235,14 +284,26 @@ class GazeSession:
             "h_ratio":       None,
             "v_ratio":       None,
             "offence_count": self.offence_count,
-            "total_away_s":  round(self.total_away_seconds, 2),
-            "penalty_score": round(self._penalty(), 2),
+            "total_away_s":  round(live_away_s, 2),
+            "penalty_score": round(self._penalty_live(ts), 2),
             "event_logged":  False,
         }
 
     def _penalty(self):
+        """Penalty based on finalized stats only (used in summary)."""
         base = (self.total_away_seconds * W_TIME) + (self.offence_count * W_OFFENCE)
         if self.offence_count >= REPEAT_OFFENDER_THRESHOLD:
+            base *= REPEAT_OFFENDER_MULTIPLIER
+        return base
+
+    def _penalty_live(self, ts):
+        """Penalty including any ongoing look-away episode."""
+        away_s = self.total_away_seconds
+        offences = self.offence_count
+        if self._looking_away and self._away_started_at is not None:
+            away_s += (ts - self._away_started_at)
+        base = (away_s * W_TIME) + (offences * W_OFFENCE)
+        if offences >= REPEAT_OFFENDER_THRESHOLD:
             base *= REPEAT_OFFENDER_MULTIPLIER
         return base
 
