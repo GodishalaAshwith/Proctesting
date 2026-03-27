@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-
+import cv2
+import numpy as np
+from utils.session_store import get_or_create, get, end_session, active_sessions
 from fastapi import FastAPI, UploadFile, File
 from utils.face_db import init_db, register_face, verify_face, list_students, delete_student, proctor_check
 import tempfile
@@ -124,3 +126,91 @@ async def proctor_check_endpoint(
         os.unlink(temp_path)
 
     return result
+
+# ===========================================================================
+# Gaze Tracking Endpoints
+# ===========================================================================
+
+@app.post("/gaze/frame/{student_id}")
+async def gaze_frame(student_id: str, file: UploadFile = File(...)):
+    """
+    Submit one webcam frame for gaze analysis.
+
+    Call this every 5 seconds (or on your existing proctoring interval).
+    The session is created automatically on first call.
+
+    Returns
+    -------
+    status        : "ok" | "no_face" | "error"
+    looking_away  : bool
+    direction     : "center" | "left" | "right" | "up" | "down" | "no_face"
+    h_ratio       : float 0-1 (horizontal iris position in eye opening)
+    v_ratio       : float 0-1 (vertical iris position)
+    offence_count : int   (number of sustained look-aways this session)
+    total_away_s  : float (total seconds looked away this session)
+    penalty_score : float (weighted penalty; see gaze_tracker.py for formula)
+    event_logged  : bool  (True when a new offence was just committed)
+    """
+    suffix = os.path.splitext(file.filename)[1] or ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        temp_path = tmp.name
+
+    try:
+        frame_bgr = cv2.imread(temp_path)
+    finally:
+        os.unlink(temp_path)
+
+    if frame_bgr is None:
+        return {"status": "error", "message": "Could not decode image."}
+
+    session = get_or_create(student_id)
+    result  = session.process_frame(frame_bgr)
+    return result
+
+
+@app.get("/gaze/summary/{student_id}")
+def gaze_summary(student_id: str):
+    """
+    Return the cumulative gaze summary for a student mid-session.
+    Does NOT end the session.
+
+    Returns
+    -------
+    student_id        : str
+    session_duration_s: float
+    offence_count     : int
+    total_away_s      : float
+    penalty_score     : float
+    events            : list of gaze-away event dicts
+    """
+    session = get(student_id)
+    if session is None:
+        return {"status": "error", "message": f"No active gaze session for '{student_id}'."}
+    return session.summary()
+
+
+@app.post("/gaze/end/{student_id}")
+def gaze_end(student_id: str):
+    """
+    End the gaze session for a student and return the final summary.
+    Releases MediaPipe resources and removes the session from memory.
+    Call this when the exam ends.
+
+    Returns
+    -------
+    Same structure as /gaze/summary but final and session is cleared.
+    """
+    summary = end_session(student_id)
+    if summary is None:
+        return {"status": "error", "message": f"No active gaze session for '{student_id}'."}
+    return {**summary, "status": "ended"}
+
+
+@app.get("/gaze/active")
+def gaze_active_sessions():
+    """
+    List all students with an active gaze session.
+    Useful for the faculty dashboard to see who is currently being tracked.
+    """
+    return {"active_sessions": active_sessions()}
