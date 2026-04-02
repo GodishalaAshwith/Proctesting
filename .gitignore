@@ -18,6 +18,7 @@ python_microservice/.ruff_cache/
 python_microservice/.coverage
 python_microservice/.env
 python_microservice/.env.*
+python_microservice/face_db.db
 backend/package-lock.json
 frontend/package-lock.json
 backend/package-lock.json
