@@ -21,6 +21,8 @@ const ViolationSchema = new mongoose.Schema(
         "face-absent",
         "face-mismatch",
         "face-multiple",
+        "gaze-away",
+        "gaze-no-face"
       ],
     },
     at: { type: Date, default: Date.now },

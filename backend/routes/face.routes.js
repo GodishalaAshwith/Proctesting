@@ -121,4 +121,80 @@ router.post(
   }
 );
 
+/**
+ * GET /api/face/gaze/active
+ * See active sessions
+ */
+router.get("/gaze/active", auth, async (req, res) => {
+  try {
+    const response = await fetch(`${FACE_SERVICE_URL}/gaze/active`);
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ error: "Face service unavailable." });
+  }
+});
+
+/**
+ * POST /api/face/gaze/frame/:studentId
+ */
+router.post(
+  "/gaze/frame/:studentId",
+  auth,
+  upload.single("image"),
+  async (req, res) => {
+    const { studentId } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file provided." });
+    }
+    try {
+      const result = await forwardImageToPython(
+        `${FACE_SERVICE_URL}/gaze/frame/${encodeURIComponent(studentId)}`,
+        req.file.buffer,
+        req.file.originalname || "frame.jpg"
+      );
+      return res.json(result);
+    } catch (err) {
+      return res.status(200).json({
+        status: "service_unavailable",
+        message: "Face service temporarily unavailable.",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/face/gaze/summary/:studentId
+ */
+router.get("/gaze/summary/:studentId", auth, async (req, res) => {
+  const { studentId } = req.params;
+  try {
+    const response = await fetch(`${FACE_SERVICE_URL}/gaze/summary/${encodeURIComponent(studentId)}`);
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    return res.status(200).json({
+      status: "service_unavailable",
+      message: "Face service temporarily unavailable.",
+    });
+  }
+});
+
+/**
+ * POST /api/face/gaze/end/:studentId
+ */
+router.post("/gaze/end/:studentId", auth, async (req, res) => {
+  const { studentId } = req.params;
+  try {
+    const response = await fetch(`${FACE_SERVICE_URL}/gaze/end/${encodeURIComponent(studentId)}`, { method: "POST" });
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    return res.status(200).json({
+      status: "service_unavailable",
+      message: "Face service temporarily unavailable.",
+    });
+  }
+});
+
 export default router;

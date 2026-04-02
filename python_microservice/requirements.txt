@@ -18,6 +18,7 @@ face-recognition-models==0.3.0
 numpy==1.26.4
 opencv-python==4.8.1.78
 Pillow==12.1.1
+mediapipe==0.10.14
 
 # Utilities
 anyio==4.12.1

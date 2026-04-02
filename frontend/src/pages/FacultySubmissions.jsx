@@ -296,11 +296,33 @@ const FacultySubmissions = () => {
                     label: "Return timeout",
                     help: "Took too long to come back",
                   },
+                  "face-absent": {
+                    label: "No face detected",
+                    help: "Student not visible to webcam",
+                  },
+                  "face-mismatch": {
+                    label: "Identity mismatch",
+                    help: "Different person detected",
+                  },
+                  "face-multiple": {
+                    label: "Multiple faces",
+                    help: "More than one person detected in frame",
+                  },
+                  "gaze-away": {
+                    label: "Looking away",
+                    help: "Sustained focus off-screen",
+                  },
+                  "gaze-no-face": {
+                    label: "Gaze face not visible",
+                    help: "Face missing during gaze check",
+                  },
                 }[e.type] || { label: e.type, help: "" };
                 return (
                   <li key={e._id} className="text-sm">
                     <span className="font-medium">{friendly.label}</span>
-                    {friendly.help ? ` – ${friendly.help}` : ""} @{" "}
+                    {friendly.help ? ` – ${friendly.help}` : ""}
+                    {e.meta?.penalty_score ? ` (Penalty Score: ${e.meta.penalty_score.toFixed(2)})` : ""}
+                    {e.meta?.confidence ? ` (Confidence: ${(e.meta.confidence*100).toFixed(0)}%)` : ""} @{" "}
                     {new Date(e.createdAt).toLocaleString()}
                   </li>
                 );

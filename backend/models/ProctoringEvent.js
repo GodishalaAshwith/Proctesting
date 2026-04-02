@@ -19,6 +19,8 @@ const ProctoringEventSchema = new mongoose.Schema(
         "face-absent",
         "face-mismatch",
         "face-multiple",
+        "gaze-away",
+        "gaze-no-face"
       ],
       required: true,
     },

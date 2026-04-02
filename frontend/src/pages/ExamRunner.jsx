@@ -7,6 +7,8 @@ import {
   submitAttempt,
   registerFace,
   checkFace,
+  sendGazeFrame,
+  endGazeSession,
 } from "../utils/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
 
@@ -46,7 +48,7 @@ const ExamRunner = () => {
     faceStep: "capture",   // "capture" | "registering" | "done" | "error"
     faceError: "",
     faceRegistered: false,
-    faceStatus: "ok",      // "ok" | "face-absent" | "face-mismatch" | "face-multiple" | "checking"
+    faceStatus: "ok",      // "ok" | "face-absent" | "face-mismatch" | "face-multiple" | "gaze-away" | "gaze-no-face" | "checking"
     lastCheckTime: null,
   });
 
@@ -61,6 +63,7 @@ const ExamRunner = () => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const faceCheckIntervalRef = useRef(null);
+  const gazeCheckIntervalRef = useRef(null);
   const studentIdRef = useRef("");
 
   const requestFullscreen = async () => {
@@ -153,6 +156,9 @@ const ExamRunner = () => {
         }
       } finally {
         isSubmittingRef.current = false;
+        try {
+          if (studentIdRef.current) await endGazeSession(studentIdRef.current);
+        } catch (err) {}
         await exitFullscreen();
       }
     },
@@ -205,6 +211,9 @@ const ExamRunner = () => {
       }
     } finally {
       isSubmittingRef.current = false;
+      try {
+        if (studentIdRef.current) await endGazeSession(studentIdRef.current);
+      } catch (err) {}
       await exitFullscreen();
     }
   };
@@ -305,6 +314,13 @@ const ExamRunner = () => {
       clearInterval(faceCheckIntervalRef.current);
       faceCheckIntervalRef.current = null;
     }
+    if (gazeCheckIntervalRef.current) {
+      clearInterval(gazeCheckIntervalRef.current);
+      gazeCheckIntervalRef.current = null;
+    }
+    try {
+      if (studentIdRef.current) endGazeSession(studentIdRef.current);
+    } catch {}
   }, []);
 
   /** Register the visible webcam frame as the student's face. */
@@ -415,6 +431,66 @@ const ExamRunner = () => {
     [captureSnapshot]
   );
 
+  /** Start the periodic gaze verification loop. */
+  const startGazeCheckLoop = useCallback(
+    (attemptId) => {
+      gazeCheckIntervalRef.current = setInterval(async () => {
+        if (!streamRef.current || !studentIdRef.current) return;
+        try {
+          const video = videoRef.current;
+          if (video && !video.srcObject && streamRef.current) {
+            video.srcObject = streamRef.current;
+            video.play().catch(e => console.error("👀 [Gaze] Play failed during re-attach:", e));
+          }
+
+          const blob = await captureSnapshot();
+          if (!blob) return;
+
+          const { data } = await sendGazeFrame(studentIdRef.current, blob);
+          console.log("👀 [Gaze] Check result:", data);
+
+          let vtype = "ok";
+          if (data.status === "no_face") {
+            vtype = "gaze-no-face";
+          } else if (data.looking_away) {
+            vtype = "gaze-away";
+          }
+
+          setState((s) => ({ 
+            ...s, 
+            faceStatus: vtype === "ok" ? s.faceStatus : vtype, // Update status if there's a gaze issue
+            lastCheckTime: new Date().toLocaleTimeString(),
+          }));
+
+          if (vtype !== "ok") {
+            console.warn("🚨 [Gaze] VIOLATION detected:", vtype);
+            await logProctorEvent(attemptId, vtype, {
+              direction: data.direction,
+              penalty_score: data.penalty_score,
+            });
+            const until = Date.now() + RETURN_TIMEOUT_SECONDS * 1000;
+            setState((s) => ({
+              ...s,
+              violations: s.violations + 1,
+              overlay: { reason: vtype, until },
+            }));
+          } else {
+            // Clear overly if gaze is now ok (auto-resume)
+            setState((s) => {
+              if (s.overlay && s.overlay.reason && s.overlay.reason.startsWith("gaze-")) {
+                return { ...s, overlay: null };
+              }
+              return s;
+            });
+          }
+        } catch (err) {
+          console.error("👀 [Gaze] Gaze check error:", err);
+        }
+      }, 5000); // 5 seconds interval
+    },
+    [captureSnapshot]
+  );
+
   const performStart = async () => {
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
@@ -446,6 +522,7 @@ const ExamRunner = () => {
 
       // Start face check loop during exam
       startFaceCheckLoop(attemptId);
+      startGazeCheckLoop(attemptId);
 
       syncCountdown(serverEndTime);
 
@@ -849,6 +926,16 @@ const ExamRunner = () => {
                 title: "Multiple faces detected",
                 detail:
                   "More than one person is visible in the camera. Only the registered student may be present during the exam.",
+              },
+              "gaze-away": {
+                title: "Looking away detected",
+                detail:
+                  "You appear to be looking away from the screen. Please keep your focus on the test.",
+              },
+              "gaze-no-face": {
+                title: "Face not visible for gaze tracking",
+                detail:
+                  "Please ensure you are sitting correctly so the webcam can track your gaze.",
               },
             };
             const v = map[state.overlay.reason] || {
