@@ -1,10 +1,10 @@
-const express = require("express");
-const auth = require("../middleware/authMiddleware");
-const Exam = require("../models/Exam");
-const Attempt = require("../models/Attempt");
-const ProctoringEvent = require("../models/ProctoringEvent");
-const User = require("../models/User");
-const Student = require("../models/Student");
+import express from "express";
+import auth from "../middleware/authMiddleware.js";
+import Exam from "../models/Exam.js";
+import Attempt from "../models/Attempt.js";
+import ProctoringEvent from "../models/ProctoringEvent.js";
+import User from "../models/User.js";
+import Student from "../models/Student.js";
 
 const router = express.Router();
 
@@ -631,4 +631,4 @@ router.get("/:id/events", auth, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

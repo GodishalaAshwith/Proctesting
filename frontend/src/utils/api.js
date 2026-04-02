@@ -89,6 +89,10 @@ export const updateExam = (id, payload) =>
   API.put(`/exams/${id}`, payload, localAuthHeader());
 export const deleteExam = (id) => API.delete(`/exams/${id}`, localAuthHeader());
 
+/** ---------------- AI ---------------- **/
+export const generateAIQuestions = (prompt) =>
+  API.post("/ai/generate-questions", { prompt }, localAuthHeader());
+
 /** ---------------- STUDENT ---------------- **/
 export const listAvailableExams = () =>
   API.get("/exams/available", localAuthHeader());
@@ -125,3 +129,32 @@ export const getMarksheet = (examId) =>
 
 /** ---------------- CONTACT ---------------- **/
 export const sendContactMessage = (payload) => API.post(`/contact`, payload);
+
+/** ---------------- FACE PROCTORING ---------------- **/
+/**
+ * Register the student's face before the exam starts.
+ * @param {string} studentId - the student's roll number
+ * @param {Blob} imageBlob   - JPEG blob captured from webcam
+ */
+export const registerFace = (studentId, imageBlob) => {
+  const form = new FormData();
+  form.append("image", imageBlob, "capture.jpg");
+  return API.post(`/face/register/${encodeURIComponent(studentId)}`, form, {
+    headers: { ...localAuthHeader().headers, "Content-Type": "multipart/form-data" },
+  });
+};
+
+/**
+ * Periodic proctoring check during an exam.
+ * @param {string} studentId - the student's roll number
+ * @param {Blob} imageBlob   - JPEG blob from webcam snapshot
+ * @returns {{ violation_type: string, match: boolean, confidence: number, face_count: number }}
+ */
+export const checkFace = (studentId, imageBlob) => {
+  const form = new FormData();
+  form.append("image", imageBlob, "frame.jpg");
+  return API.post(`/face/check/${encodeURIComponent(studentId)}`, form, {
+    headers: { ...localAuthHeader().headers, "Content-Type": "multipart/form-data" },
+  });
+};
+

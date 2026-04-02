@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const QuestionSchema = new mongoose.Schema(
   {
@@ -96,4 +96,4 @@ ExamSchema.path("questions").validate(function (questions) {
   return true;
 }, "Invalid questions configuration");
 
-module.exports = mongoose.model("Exam", ExamSchema);
+export default mongoose.model("Exam", ExamSchema);

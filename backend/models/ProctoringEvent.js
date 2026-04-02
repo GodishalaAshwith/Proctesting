@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const ProctoringEventSchema = new mongoose.Schema(
   {
@@ -15,6 +15,10 @@ const ProctoringEventSchema = new mongoose.Schema(
         "visibility-hidden",
         "fullscreen-exit",
         "return-timeout",
+        "window-resize",
+        "face-absent",
+        "face-mismatch",
+        "face-multiple",
       ],
       required: true,
     },
@@ -24,4 +28,4 @@ const ProctoringEventSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("ProctoringEvent", ProctoringEventSchema);
+export default mongoose.model("ProctoringEvent", ProctoringEventSchema);

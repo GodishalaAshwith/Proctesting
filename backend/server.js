@@ -1,13 +1,17 @@
-const express = require("express");
-const dotenv = require("dotenv");
-const cors = require("cors");
-const connectDB = require("./config/db");
-const authRoutes = require("./routes/auth");
-const adminRoutes = require("./routes/admin");
-const examRoutes = require("./routes/exams");
-const attemptRoutes = require("./routes/attempts");
-const miscRoutes = require("./routes/misc");
-const { scheduleDailyRunner } = require("./scheduler/promotion");
+import express from "express";
+import dotenv from "dotenv";
+import cors from "cors";
+import connectDB from "./config/db.js";
+import authRoutes from "./routes/auth.js";
+import adminRoutes from "./routes/admin.js";
+import examRoutes from "./routes/exams.js";
+import attemptRoutes from "./routes/attempts.js";
+import miscRoutes from "./routes/misc.js";
+import { scheduleDailyRunner } from "./scheduler/promotion.js";
+import aiRoutes from "./routes/ai.routes.js";
+import faceRoutes from "./routes/face.routes.js";
+
+
 
 dotenv.config(); // Load environment variables
 
@@ -30,6 +34,8 @@ app.use(cors(corsOptions)); // Allow frontend to connect
 app.use(express.json()); // Parse JSON body
 
 // Routes
+app.use("/api/ai", aiRoutes);
+app.use("/api/face", faceRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/exams", examRoutes);

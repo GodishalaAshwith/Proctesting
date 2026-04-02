@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const AnswerSchema = new mongoose.Schema(
   {
@@ -17,6 +17,10 @@ const ViolationSchema = new mongoose.Schema(
         "visibility-hidden",
         "fullscreen-exit",
         "return-timeout",
+        "window-resize",
+        "face-absent",
+        "face-mismatch",
+        "face-multiple",
       ],
     },
     at: { type: Date, default: Date.now },
@@ -68,4 +72,4 @@ AttemptSchema.index(
   { unique: false }
 );
 
-module.exports = mongoose.model("Attempt", AttemptSchema);
+export default mongoose.model("Attempt", AttemptSchema);
