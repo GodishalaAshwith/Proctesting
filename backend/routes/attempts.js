@@ -43,6 +43,37 @@ const sanitizeExamForStudent = (exam) => ({
   })),
 });
 
+// Marksheet helpers (faculty export)
+const marksheetColumnHeader = (idx, q) => {
+  const info = String(q?.additionalInfo || "").trim();
+  return info ? `Q${idx + 1} (${info})` : `Q${idx + 1}`;
+};
+
+const scoreQuestion = (q, given) => {
+  if (!q) return 0;
+  const pts = Number(q.points || 0) || 0;
+  if (q.type === "text") return null; // leave blank for manual grading
+
+  if (q.type === "single") {
+    const correct = Array.isArray(q.correctAnswers) ? q.correctAnswers[0] : null;
+    return typeof given === "number" && correct != null && given === correct
+      ? pts
+      : 0;
+  }
+
+  if (q.type === "mcq") {
+    const correct = new Set(q.correctAnswers || []);
+    const givenSet = new Set(Array.isArray(given) ? given : []);
+    if (correct.size !== givenSet.size) return 0;
+    for (const i of correct) {
+      if (!givenSet.has(i)) return 0;
+    }
+    return pts;
+  }
+
+  return 0;
+};
+
 // POST /api/attempts/start { examId }
 router.post("/start", auth, auth.requireRole("student"), async (req, res) => {
   try {
@@ -427,6 +458,98 @@ router.get(
       }));
 
       return res.json(mapped);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+// Faculty: marksheet export data for an exam
+// GET /api/attempts/exam/:examId/marksheet
+// Returns: { examTitle, rows: [{ RollNo, Q1 (...): n, ... }] }
+router.get(
+  "/exam/:examId/marksheet",
+  auth,
+  auth.requireRole("faculty"),
+  async (req, res) => {
+    try {
+      const exam = await Exam.findOne({
+        _id: req.params.examId,
+        createdBy: req.user.id,
+      })
+        .select("title questions")
+        .lean();
+      if (!exam) return res.status(404).json({ message: "Exam not found" });
+
+      const questions = Array.isArray(exam.questions) ? exam.questions : [];
+      const headers = questions.map((q, idx) => marksheetColumnHeader(idx, q));
+
+      // Pull submitted attempts, newest first; later we de-dup per student.
+      const attempts = await Attempt.find({
+        examId: exam._id,
+        status: "submitted",
+      })
+        .select("studentId studentRef answers submittedAt createdAt")
+        .populate({
+          path: "studentId",
+          select: "name email rollno",
+          strictPopulate: false,
+        })
+        .sort({ submittedAt: -1, createdAt: -1 })
+        .lean();
+
+      const studentKey = (a) => {
+        const s = a.studentId;
+        if (s && typeof s === "object") {
+          return (
+            String(s.rollno || "").trim() ||
+            String(s.email || "").trim() ||
+            String(s._id || "").trim()
+          );
+        }
+        return String(s || "").trim();
+      };
+
+      // Deduplicate: one row per student (latest submitted attempt wins).
+      const latestByStudent = new Map();
+      for (const a of attempts) {
+        const key = studentKey(a);
+        if (!key) continue;
+        if (!latestByStudent.has(key)) latestByStudent.set(key, a);
+      }
+
+      const rows = Array.from(latestByStudent.values())
+        .map((a) => {
+          const s = a.studentId && typeof a.studentId === "object" ? a.studentId : null;
+          const rollNo =
+            String(s?.rollno || "").trim() ||
+            String(s?.email || "").trim() ||
+            String(a.studentId || "").trim();
+
+          const ansMap = new Map(
+            (a.answers || [])
+              .filter((x) => typeof x?.questionIndex === "number")
+              .map((x) => [x.questionIndex, x.value])
+          );
+
+          const row = { RollNo: rollNo };
+          let total = 0;
+          for (let i = 0; i < questions.length; i++) {
+            const header = headers[i];
+            const mark = scoreQuestion(questions[i], ansMap.get(i));
+            row[header] = mark == null ? "" : mark;
+            if (typeof mark === "number" && Number.isFinite(mark)) total += mark;
+          }
+          row.Total = total;
+          return row;
+        })
+        .sort((a, b) => String(a.RollNo).localeCompare(String(b.RollNo)));
+
+      return res.json({
+        examTitle: exam.title || "exam",
+        rows,
+      });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: "Internal server error" });

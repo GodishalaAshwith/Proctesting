@@ -6,6 +6,7 @@ import {
   listAttemptsForExam,
   grantRetake,
   getExam,
+  getMarksheet,
 } from "../utils/api";
 
 const FacultySubmissions = () => {
@@ -29,6 +30,185 @@ const FacultySubmissions = () => {
       .trim();
     // Avoid trailing dots/spaces
     return cleaned.replace(/[\.\s]+$/g, "").slice(0, 150) || "exam";
+  };
+
+  const exportQuestionPaper = async () => {
+    try {
+      const { jsPDF } = await import("jspdf");
+      const { data } = await getExam(examId);
+      const exam = data || {};
+      const title = exam?.title || examTitle || "exam";
+      const durationMins = Number(exam?.durationMins);
+      const description = exam?.description || "";
+      const questions = Array.isArray(exam?.questions) ? exam.questions : [];
+
+      const totalMarks = questions.reduce((sum, q) => {
+        const pts = Number(q?.points);
+        return sum + (Number.isFinite(pts) ? pts : 0);
+      }, 0);
+
+      const formatMark = (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "-";
+        return n.toFixed(2).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+      };
+
+      const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const now = new Date();
+      const base = sanitizeFileName(title);
+
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 14;
+      const contentW = pageW - margin * 2;
+      const lineGap = 5;
+      let y = margin;
+
+      const ensureSpace = (neededMm) => {
+        if (y + neededMm <= pageH - margin) return;
+        doc.addPage();
+        y = margin;
+      };
+
+      // Header
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      const titleLines = doc.splitTextToSize(String(title || ""), contentW);
+      doc.text(titleLines, margin, y);
+      y += titleLines.length * 7;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(51, 65, 85);
+      const leftMeta = `Duration: ${Number.isFinite(durationMins) ? `${formatMark(durationMins)} mins` : "-"}`;
+      const rightMeta = `Total Marks: ${formatMark(totalMarks)}`;
+      doc.text(leftMeta, margin, y);
+      doc.text(rightMeta, pageW - margin, y, { align: "right" });
+      y += 5;
+      doc.text(`Generated: ${now.toLocaleString()}`, margin, y);
+      doc.text(`Questions: ${String(questions.length)}`, pageW - margin, y, {
+        align: "right",
+      });
+      y += 6;
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.6);
+      doc.line(margin, y, pageW - margin, y);
+      y += 7;
+
+      if (String(description || "").trim()) {
+        doc.setFontSize(10);
+        doc.setTextColor(51, 65, 85);
+        const descLines = doc.splitTextToSize(String(description), contentW);
+        ensureSpace(descLines.length * lineGap + 4);
+        doc.text(descLines, margin, y);
+        y += descLines.length * lineGap + 6;
+      }
+
+      // Questions
+      questions.forEach((q, idx) => {
+        const qType = String(q?.type || "").trim();
+        const qText = String(q?.text || "").trim();
+        const info = String(q?.additionalInfo || "").trim();
+        const pts = Number(q?.points);
+        const options = Array.isArray(q?.options)
+          ? q.options.map((o) => String(o ?? "").trim()).filter(Boolean)
+          : [];
+
+        // Estimate block height conservatively to avoid awkward splits.
+        const qLines = doc.splitTextToSize(`Q${idx + 1}. ${qText}`, contentW - 28);
+        const infoLines = info
+          ? doc.splitTextToSize(`Info: ${info}`, contentW)
+          : [];
+        const optLines =
+          qType === "single" || qType === "mcq"
+            ? options.reduce((acc, opt, oi) => {
+                const label = letters[oi] || String(oi + 1);
+                const lines = doc.splitTextToSize(
+                  `${label}. ${opt}`,
+                  contentW - 6
+                );
+                acc.push(...lines);
+                return acc;
+              }, [])
+            : [];
+
+        const extraForText = qType === "text" ? 5 * 8 : 0;
+        const approxHeight =
+          qLines.length * lineGap +
+          (infoLines.length ? infoLines.length * 4 + 2 : 0) +
+          (optLines.length ? optLines.length * 4 + 3 : 0) +
+          extraForText +
+          10;
+        ensureSpace(approxHeight);
+
+        // Question header line + marks
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(15, 23, 42);
+        const qPrefix = `Q${idx + 1}. `;
+        const textStartX = margin;
+        const marksText = `Marks: ${Number.isFinite(pts) ? formatMark(pts) : "-"}`;
+        doc.text(marksText, pageW - margin, y, { align: "right" });
+
+        // Render the question text in wrapped lines (keeping space for marks on the first line)
+        const firstLineMaxW = contentW - 28;
+        const firstLine = doc.splitTextToSize(`${qPrefix}${qText}`, firstLineMaxW);
+        doc.text(firstLine, textStartX, y);
+        y += firstLine.length * lineGap;
+
+        if (infoLines.length) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9.5);
+          doc.setTextColor(71, 85, 105);
+          doc.text(infoLines, margin, y);
+          y += infoLines.length * 4 + 2;
+        }
+
+        if (qType === "single" || qType === "mcq") {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(15, 23, 42);
+          options.forEach((opt, oi) => {
+            const label = letters[oi] || String(oi + 1);
+            const lines = doc.splitTextToSize(
+              `${label}. ${opt}`,
+              contentW - 6
+            );
+            ensureSpace(lines.length * 4 + 2);
+            doc.text(lines, margin + 3, y);
+            y += lines.length * 4 + 1;
+          });
+          y += 2;
+        }
+
+        if (qType === "text") {
+          doc.setDrawColor(203, 213, 225);
+          doc.setLineWidth(0.3);
+          for (let i = 0; i < 5; i++) {
+            ensureSpace(8);
+            doc.line(margin, y + 6, pageW - margin, y + 6);
+            y += 8;
+          }
+        }
+
+        // Separator
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.4);
+        ensureSpace(8);
+        doc.line(margin, y, pageW - margin, y);
+        y += 8;
+      });
+
+      doc.save(`${base}-question-paper.pdf`);
+    } catch (e) {
+      alert(
+        e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "Failed to download question paper"
+      );
+    }
   };
 
   // For Excel export: only Roll number and Marks
@@ -84,6 +264,102 @@ const FacultySubmissions = () => {
       bookType: "csv",
       FS: ",",
     });
+  };
+
+  const exportMarksheet = async () => {
+    try {
+      const { data } = await getMarksheet(examId);
+      const sheetRows = data?.rows || [];
+      if (!sheetRows.length) {
+        alert("No submitted attempts to export.");
+        return;
+      }
+
+      // Compute Total on the client as a fallback (and to guarantee the column exists).
+      const normalizedRows = sheetRows.map((row) => {
+        const r = { ...(row || {}) };
+        if (typeof r.Total !== "number" || !Number.isFinite(r.Total)) {
+          let total = 0;
+          for (const [k, v] of Object.entries(r)) {
+            if (k === "RollNo" || k === "Total") continue;
+            if (typeof v === "number" && Number.isFinite(v)) total += v;
+          }
+          r.Total = total;
+        }
+        return r;
+      });
+
+      // Stable column order: RollNo first, Total last, all other columns in between.
+      const seen = new Set();
+      const mid = [];
+      for (const r of normalizedRows) {
+        for (const k of Object.keys(r || {})) {
+          if (k === "RollNo" || k === "Total") continue;
+          if (!seen.has(k)) {
+            seen.add(k);
+            mid.push(k);
+          }
+        }
+      }
+      const headers = ["RollNo", ...mid, "Total"];
+
+      const ws = XLSX.utils.json_to_sheet(normalizedRows, { header: headers });
+      if (ws["!ref"]) {
+        const range = XLSX.utils.decode_range(ws["!ref"]);
+        ws["!autofilter"] = { ref: XLSX.utils.encode_range(range) };
+
+        // Basic readability improvements (no custom colors/fonts):
+        // - Freeze header row + RollNo column
+        // - Set reasonable column widths
+        // - Format numeric marks to show decimals cleanly
+        ws["!sheetViews"] = [
+          {
+            state: "frozen",
+            xSplit: 1,
+            ySplit: 1,
+            topLeftCell: "B2",
+            activePane: "bottomRight",
+          },
+        ];
+
+        const widths = headers.map((h) => {
+          let maxLen = String(h || "").length;
+          for (let i = 0; i < normalizedRows.length; i++) {
+            const v = normalizedRows[i]?.[h];
+            const len = v == null ? 0 : String(v).length;
+            if (len > maxLen) maxLen = len;
+          }
+          // Keep within a sane range for visibility
+          const wch = Math.min(Math.max(maxLen + 2, 10), 42);
+          return { wch };
+        });
+        ws["!cols"] = widths;
+
+        // Apply a numeric format for all numeric cells except header row.
+        for (let r = range.s.r + 1; r <= range.e.r; r++) {
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const addr = XLSX.utils.encode_cell({ r, c });
+            const cell = ws[addr];
+            if (!cell) continue;
+            if (cell.t === "n") cell.z = "0.##";
+          }
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Marksheet");
+      const base = sanitizeFileName(examTitle || data?.examTitle || "exam");
+      const fname = `${base}-marksheet.xlsx`;
+      XLSX.writeFile(wb, fname, {
+        bookType: "xlsx",
+        compression: true,
+      });
+    } catch (e) {
+      alert(
+        e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "Failed to export marksheet"
+      );
+    }
   };
 
   const fetchAttempts = useCallback(async () => {
@@ -177,6 +453,21 @@ const FacultySubmissions = () => {
             title="Download submissions as Excel (.xlsx)"
           >
             Export Excel
+          </button>
+          <button
+            onClick={exportMarksheet}
+            disabled={!rows.length}
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            title="Download marksheet (RollNo x Question marks) as Excel (.xlsx)"
+          >
+            Export Marksheet
+          </button>
+          <button
+            onClick={exportQuestionPaper}
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+            title="Download a neatly formatted question paper (PDF)"
+          >
+            Download Question Paper (PDF)
           </button>
           <Link
             to={`/faculty/exams/`}
