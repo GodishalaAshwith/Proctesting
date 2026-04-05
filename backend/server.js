@@ -1,6 +1,8 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import http from "http";
+import { Server } from "socket.io";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
@@ -16,6 +18,7 @@ import faceRoutes from "./routes/face.routes.js";
 dotenv.config(); // Load environment variables
 
 const app = express();
+const httpServer = http.createServer(app);
 connectDB(); // Connect to MongoDB
 
 // Middleware
@@ -32,6 +35,66 @@ const corsOptions =
       };
 app.use(cors(corsOptions)); // Allow frontend to connect
 app.use(express.json()); // Parse JSON body
+
+// Socket.io Setup
+const io = new Server(httpServer, {
+  cors: corsOptions,
+});
+
+io.on("connection", (socket) => {
+  console.log(`🔌 Socket connected: ${socket.id}`);
+
+  // When faculty joins an exam live room
+  socket.on("faculty:join", ({ examId }) => {
+    socket.join(`exam_${examId}_faculty`);
+    // Notify students that faculty is here, so they can send streams
+    socket.to(`exam_${examId}`).emit("faculty:online");
+  });
+
+  // When student joins an exam
+  socket.on("student:join", ({ examId, studentId, studentName }) => {
+    socket.examId = examId;
+    socket.studentId = studentId;
+    socket.join(`exam_${examId}`);
+    // Notify faculty in that exam room
+    socket.to(`exam_${examId}_faculty`).emit("student:joined", { socketId: socket.id, studentId, studentName });
+  });
+
+  // Signaling for WebRTC
+  socket.on("faculty:request_offer", ({ studentSocketId }) => {
+    io.to(studentSocketId).emit("faculty:request_offer", { facultySocketId: socket.id });
+  });
+
+  socket.on("webrtc:offer", ({ targetSocketId, offer, studentId, studentName }) => {
+    io.to(targetSocketId).emit("webrtc:offer", { senderSocketId: socket.id, offer, studentId, studentName });
+  });
+
+  socket.on("webrtc:answer", ({ targetSocketId, answer }) => {
+    io.to(targetSocketId).emit("webrtc:answer", { senderSocketId: socket.id, answer });
+  });
+
+  socket.on("webrtc:candidate", ({ targetSocketId, candidate }) => {
+    io.to(targetSocketId).emit("webrtc:candidate", { senderSocketId: socket.id, candidate });
+  });
+
+  // Proctoring violations forwarding
+  socket.on("student:violation", ({ examId, studentId, type }) => {
+    socket.to(`exam_${examId}_faculty`).emit("student:violation", { studentId, type });
+  });
+
+  // Settings & Debug config forward
+  socket.on("faculty:toggle_autosubmit", ({ examId, enabled }) => {
+    socket.to(`exam_${examId}`).emit("config:autosubmit", { enabled });
+  });
+
+  socket.on("disconnect", () => {
+    console.log(`🔌 Socket disconnected: ${socket.id}`);
+    if (socket.studentId && socket.examId) {
+      socket.to(`exam_${socket.examId}_faculty`).emit("student:left", { studentId: socket.studentId });
+    }
+  });
+});
+
 
 // Routes
 app.use("/api/ai", aiRoutes);
@@ -62,4 +125,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+httpServer.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

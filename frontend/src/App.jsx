@@ -16,6 +16,7 @@ import AdminUsers from "./pages/AdminUsers";
 import FacultyExams from "./pages/FacultyExams";
 import ExamEditor from "./pages/ExamEditor";
 import FacultySubmissions from "./pages/FacultySubmissions";
+import FacultyLiveView from "./pages/FacultyLiveView";
 import StudentExams from "./pages/StudentExams";
 import ExamRunner from "./pages/ExamRunner";
 import StudentProfile from "./pages/StudentProfile";
@@ -140,6 +141,16 @@ function AppShell() {
               <PrivateRoute>
                 <RoleRoute allow={["faculty"]}>
                   <FacultySubmissions />
+                </RoleRoute>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/faculty/exams/:examId/live"
+            element={
+              <PrivateRoute>
+                <RoleRoute allow={["faculty"]}>
+                  <FacultyLiveView />
                 </RoleRoute>
               </PrivateRoute>
             }

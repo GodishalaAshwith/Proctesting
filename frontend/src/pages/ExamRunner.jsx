@@ -11,6 +11,7 @@ import {
   endGazeSession,
 } from "../utils/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
+import { io } from "socket.io-client";
 
 const RETURN_TIMEOUT_SECONDS = 10;
 const AUTOSAVE_MS = 3000;
@@ -65,6 +66,9 @@ const ExamRunner = () => {
   const faceCheckIntervalRef = useRef(null);
   const gazeCheckIntervalRef = useRef(null);
   const studentIdRef = useRef("");
+  const socketRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const autoSubmitEnabledRef = useRef(true);
 
   const requestFullscreen = async () => {
     const el = document.documentElement;
@@ -232,13 +236,18 @@ const ExamRunner = () => {
         // ignore logging failure
       }
 
+      if (socketRef.current) {
+        socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type });
+      }
+
       // Track serious violations and auto-submit after threshold
       if (SERIOUS_VIOLATION_TYPES.has(type)) {
         seriousViolationCountRef.current += 1;
         if (
+          autoSubmitEnabledRef.current &&
           seriousViolationCountRef.current >= AUTO_SUBMIT_AFTER_SERIOUS_COUNT
         ) {
-          // Immediate auto-submit on repeated serious violation
+          // Immediate auto-submit on repeated serious violation if enabled
           await handleSubmit(true);
           return;
         }
@@ -265,7 +274,9 @@ const ExamRunner = () => {
         if (now >= until) {
           clearInterval(check);
           setState((s2) => ({ ...s2, overlay: null }));
-          handleSubmit(true);
+          if (autoSubmitEnabledRef.current) {
+            handleSubmit(true);
+          }
         }
       }, 250);
     },
@@ -290,9 +301,15 @@ const ExamRunner = () => {
   /** Start the webcam stream and attach it to the video element. */
   const startWebcam = useCallback(async () => {
     try {
+      if (streamRef.current) return;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
       });
+      // Safety check: if component unmounted or already has stream while awaiting
+      if (!videoRef.current || streamRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -401,6 +418,9 @@ const ExamRunner = () => {
 
           if (vtype && vtype !== "none" && vtype !== "service_unavailable") {
             console.warn("🚨 [Proctor] VIOLATION detected:", vtype);
+            if (socketRef.current) {
+              socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
+            }
             await logProctorEvent(attemptId, vtype, {
               confidence: data.confidence,
               face_count: data.face_count,
@@ -464,6 +484,9 @@ const ExamRunner = () => {
 
           if (vtype !== "ok") {
             console.warn("🚨 [Gaze] VIOLATION detected:", vtype);
+            if (socketRef.current) {
+              socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
+            }
             await logProctorEvent(attemptId, vtype, {
               direction: data.direction,
               penalty_score: data.penalty_score,
@@ -496,6 +519,77 @@ const ExamRunner = () => {
     try {
       const { data } = await startAttempt(examId);
       const { attemptId, exam, serverEndTime } = data;
+
+      // Socket and WebRTC Setup
+      const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+        transports: ["websocket"],
+      });
+      socketRef.current = socket;
+
+      socket.on("connect", () => {
+        socket.emit("student:join", {
+          examId,
+          studentId: studentIdRef.current,
+          studentName: JSON.parse(localStorage.getItem("user"))?.name || "Student",
+        });
+      });
+
+      socket.on("faculty:online", () => {
+        // Re-announce presence if faculty joins late or reconnects
+        socket.emit("student:join", {
+          examId,
+          studentId: studentIdRef.current,
+          studentName: JSON.parse(localStorage.getItem("user"))?.name || "Student",
+        });
+      });
+
+      socket.on("config:autosubmit", ({ enabled }) => {
+        autoSubmitEnabledRef.current = enabled;
+      });
+
+      socket.on("faculty:request_offer", async ({ facultySocketId }) => {
+        try {
+          const pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: "stun:stun.l.google.com:19302" }
+            ],
+          });
+          peerConnectionRef.current = pc;
+
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => pc.addTrack(track, streamRef.current));
+          }
+
+          pc.onicecandidate = (event) => {
+            if (event.candidate) {
+              socket.emit("webrtc:candidate", { targetSocketId: facultySocketId, candidate: event.candidate });
+            }
+          };
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("webrtc:offer", {
+            targetSocketId: facultySocketId,
+            offer,
+            studentId: studentIdRef.current,
+            studentName: JSON.parse(localStorage.getItem("user"))?.name || "Student"
+          });
+        } catch (err) {
+          console.error("WebRTC Error:", err);
+        }
+      });
+
+      socket.on("webrtc:answer", async ({ answer }) => {
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+      });
+
+      socket.on("webrtc:candidate", async ({ candidate }) => {
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      });
 
       // Request fullscreen FIRST
       await requestFullscreen();
@@ -544,6 +638,15 @@ const ExamRunner = () => {
   };
 
   useEffect(() => {
+    if (state.submitted) {
+      stopWebcam();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    }
+  }, [state.submitted, stopWebcam]);
+
+  useEffect(() => {
     const stored = localStorage.getItem("user");
     if (!stored) {
       navigate("/login");
@@ -559,6 +662,8 @@ const ExamRunner = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       stopWebcam();
+      if (socketRef.current) socketRef.current.disconnect();
+      if (peerConnectionRef.current) peerConnectionRef.current.close();
     };
   }, [examId, navigate]);
 
