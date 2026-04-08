@@ -98,8 +98,8 @@ export const listAvailableExams = () =>
   API.get("/exams/available", localAuthHeader());
 
 /** ---------------- ATTEMPTS ---------------- **/
-export const startAttempt = (examId) =>
-  API.post("/attempts/start", { examId }, localAuthHeader());
+export const startAttempt = (examId, payload = {}) =>
+  API.post("/attempts/start", { examId, ...payload }, localAuthHeader());
 export const saveAttempt = (attemptId, answers) =>
   API.post("/attempts/save", { attemptId, answers }, localAuthHeader());
 export const submitAttempt = (attemptId, answers) =>

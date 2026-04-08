@@ -61,6 +61,16 @@ const AttemptSchema = new mongoose.Schema(
       default: "in-progress",
       index: true,
     },
+    deviceInfo: {
+      cores: { type: Number },
+      memory: { type: Number },
+      os: { type: String }
+    },
+    proctoringTier: {
+      type: String,
+      enum: ["full", "snapshot", "event-only"],
+      default: "full"
+    },
     answers: { type: [AnswerSchema], default: [] },
     score: { type: Number, default: 0 },
     manualNeeded: { type: Boolean, default: false },

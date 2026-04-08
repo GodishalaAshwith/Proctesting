@@ -12,6 +12,7 @@ import {
 } from "../utils/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
 import { io } from "socket.io-client";
+import { evaluateDeviceCapabilities } from "../utils/deviceMetrics";
 
 const RETURN_TIMEOUT_SECONDS = 10;
 const AUTOSAVE_MS = 3000;
@@ -69,6 +70,7 @@ const ExamRunner = () => {
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const autoSubmitEnabledRef = useRef(true);
+  const proctoringTierRef = useRef("full");
 
   const requestFullscreen = async () => {
     const el = document.documentElement;
@@ -328,11 +330,11 @@ const ExamRunner = () => {
       streamRef.current = null;
     }
     if (faceCheckIntervalRef.current) {
-      clearInterval(faceCheckIntervalRef.current);
+      clearTimeout(faceCheckIntervalRef.current);
       faceCheckIntervalRef.current = null;
     }
     if (gazeCheckIntervalRef.current) {
-      clearInterval(gazeCheckIntervalRef.current);
+      clearTimeout(gazeCheckIntervalRef.current);
       gazeCheckIntervalRef.current = null;
     }
     try {
@@ -366,10 +368,10 @@ const ExamRunner = () => {
     }
   }, [captureSnapshot]);
 
-  /** Start the periodic face verification loop. */
   const startFaceCheckLoop = useCallback(
     (attemptId) => {
-      faceCheckIntervalRef.current = setInterval(async () => {
+      const runLoop = async () => {
+        if (proctoringTierRef.current === "event-only") return;
         if (!streamRef.current || !studentIdRef.current) return;
         try {
           const video = videoRef.current;
@@ -396,65 +398,77 @@ const ExamRunner = () => {
               console.log("📷 [Proctor] Video was paused, attempting to resume...");
               video.play().catch(e => console.error("📷 [Proctor] Resume failed:", e));
             }
-            return;
-          }
-          const { data } = await checkFace(studentIdRef.current, blob);
-          console.log("📷 [Proctor] Check result:", data.violation_type, data.face_count, data.confidence);
-          
-          // Map Python service names to our canonical event type names
-          const FACE_VIOLATION_MAP = {
-            no_face: "face-absent",
-            wrong_face: "face-mismatch",
-            multiple_faces: "face-multiple",
-          };
-          const rawType = data.violation_type || data.status; // Support both endpoints
-          const vtype = FACE_VIOLATION_MAP[rawType] || rawType;
-          
-          setState((s) => ({ 
-            ...s, 
-            faceStatus: vtype === "none" || vtype === "ok" ? "ok" : vtype,
-            lastCheckTime: new Date().toLocaleTimeString(),
-          }));
-
-          if (vtype && vtype !== "none" && vtype !== "service_unavailable") {
-            console.warn("🚨 [Proctor] VIOLATION detected:", vtype);
-            if (socketRef.current) {
-              socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
-            }
-            await logProctorEvent(attemptId, vtype, {
-              confidence: data.confidence,
-              face_count: data.face_count,
-            });
-            if (SERIOUS_VIOLATION_TYPES.has(vtype)) {
-              seriousViolationCountRef.current += 1;
-            }
-            const until = Date.now() + RETURN_TIMEOUT_SECONDS * 1000;
-            setState((s) => ({
-              ...s,
-              violations: s.violations + 1,
-              overlay: { reason: vtype, until },
+          } else {
+            const { data } = await checkFace(studentIdRef.current, blob);
+            console.log("📷 [Proctor] Check result:", data.violation_type, data.face_count, data.confidence);
+            
+            // Map Python service names to our canonical event type names
+            const FACE_VIOLATION_MAP = {
+              no_face: "face-absent",
+              wrong_face: "face-mismatch",
+              multiple_faces: "face-multiple",
+            };
+            const rawType = data.violation_type || data.status; // Support both endpoints
+            const vtype = FACE_VIOLATION_MAP[rawType] || rawType;
+            
+            setState((s) => ({ 
+              ...s, 
+              faceStatus: vtype === "none" || vtype === "ok" ? "ok" : vtype,
+              lastCheckTime: new Date().toLocaleTimeString(),
             }));
-          } else if (vtype === "none") {
-            // Clear overlay if face is now ok (auto-resume)
-            setState((s) => {
-              if (s.overlay && s.overlay.reason && s.overlay.reason.startsWith("face-")) {
-                return { ...s, overlay: null };
+
+            if (vtype && vtype !== "none" && vtype !== "service_unavailable") {
+              console.warn("🚨 [Proctor] VIOLATION detected:", vtype);
+              if (socketRef.current) {
+                socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
               }
-              return s;
-            });
+              await logProctorEvent(attemptId, vtype, {
+                confidence: data.confidence,
+                face_count: data.face_count,
+              });
+              if (SERIOUS_VIOLATION_TYPES.has(vtype)) {
+                seriousViolationCountRef.current += 1;
+              }
+              const until = Date.now() + RETURN_TIMEOUT_SECONDS * 1000;
+              setState((s) => ({
+                ...s,
+                violations: s.violations + 1,
+                overlay: { reason: vtype, until },
+              }));
+            } else if (vtype === "none") {
+              // Clear overlay if face is now ok (auto-resume)
+              setState((s) => {
+                if (s.overlay && s.overlay.reason && s.overlay.reason.startsWith("face-")) {
+                  return { ...s, overlay: null };
+                }
+                return s;
+              });
+            }
           }
         } catch (err) {
           console.error("📷 [Proctor] Face check error:", err);
         }
-      }, FACE_CHECK_INTERVAL_MS);
+
+        if (streamRef.current) {
+           let nextInterval = FACE_CHECK_INTERVAL_MS;
+           if (proctoringTierRef.current === "snapshot") {
+              nextInterval = Math.floor(Math.random() * (45000 - 15000 + 1)) + 15000;
+           }
+           faceCheckIntervalRef.current = setTimeout(runLoop, nextInterval);
+        }
+      };
+
+      if (proctoringTierRef.current !== "event-only") {
+        faceCheckIntervalRef.current = setTimeout(runLoop, FACE_CHECK_INTERVAL_MS);
+      }
     },
-    [captureSnapshot]
+    [captureSnapshot, examId]
   );
 
-  /** Start the periodic gaze verification loop. */
   const startGazeCheckLoop = useCallback(
     (attemptId) => {
-      gazeCheckIntervalRef.current = setInterval(async () => {
+      const runLoop = async () => {
+        if (proctoringTierRef.current === "event-only") return;
         if (!streamRef.current || !studentIdRef.current) return;
         try {
           const video = videoRef.current;
@@ -464,60 +478,78 @@ const ExamRunner = () => {
           }
 
           const blob = await captureSnapshot();
-          if (!blob) return;
+          if (blob) {
+            const { data } = await sendGazeFrame(studentIdRef.current, blob);
+            console.log("👀 [Gaze] Check result:", data);
 
-          const { data } = await sendGazeFrame(studentIdRef.current, blob);
-          console.log("👀 [Gaze] Check result:", data);
-
-          let vtype = "ok";
-          if (data.status === "no_face") {
-            vtype = "gaze-no-face";
-          } else if (data.looking_away) {
-            vtype = "gaze-away";
-          }
-
-          setState((s) => ({ 
-            ...s, 
-            faceStatus: vtype === "ok" ? s.faceStatus : vtype, // Update status if there's a gaze issue
-            lastCheckTime: new Date().toLocaleTimeString(),
-          }));
-
-          if (vtype !== "ok") {
-            console.warn("🚨 [Gaze] VIOLATION detected:", vtype);
-            if (socketRef.current) {
-              socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
+            let vtype = "ok";
+            if (data.status === "no_face") {
+              vtype = "gaze-no-face";
+            } else if (data.looking_away) {
+              vtype = "gaze-away";
             }
-            await logProctorEvent(attemptId, vtype, {
-              direction: data.direction,
-              penalty_score: data.penalty_score,
-            });
-            const until = Date.now() + RETURN_TIMEOUT_SECONDS * 1000;
-            setState((s) => ({
-              ...s,
-              violations: s.violations + 1,
-              overlay: { reason: vtype, until },
+
+            setState((s) => ({ 
+              ...s, 
+              faceStatus: vtype === "ok" ? s.faceStatus : vtype, // Update status if there's a gaze issue
+              lastCheckTime: new Date().toLocaleTimeString(),
             }));
-          } else {
-            // Clear overly if gaze is now ok (auto-resume)
-            setState((s) => {
-              if (s.overlay && s.overlay.reason && s.overlay.reason.startsWith("gaze-")) {
-                return { ...s, overlay: null };
+
+            if (vtype !== "ok") {
+              console.warn("🚨 [Gaze] VIOLATION detected:", vtype);
+              if (socketRef.current) {
+                socketRef.current.emit("student:violation", { examId, studentId: studentIdRef.current, type: vtype });
               }
-              return s;
-            });
+              await logProctorEvent(attemptId, vtype, {
+                direction: data.direction,
+                penalty_score: data.penalty_score,
+              });
+              const until = Date.now() + RETURN_TIMEOUT_SECONDS * 1000;
+              setState((s) => ({
+                ...s,
+                violations: s.violations + 1,
+                overlay: { reason: vtype, until },
+              }));
+            } else {
+              // Clear overly if gaze is now ok (auto-resume)
+              setState((s) => {
+                if (s.overlay && s.overlay.reason && s.overlay.reason.startsWith("gaze-")) {
+                  return { ...s, overlay: null };
+                }
+                return s;
+              });
+            }
           }
         } catch (err) {
           console.error("👀 [Gaze] Gaze check error:", err);
         }
-      }, 5000); // 5 seconds interval
+
+        if (streamRef.current) {
+           let nextInterval = 5000;
+           if (proctoringTierRef.current === "snapshot") {
+              nextInterval = Math.floor(Math.random() * (30000 - 10000 + 1)) + 10000;
+           }
+           gazeCheckIntervalRef.current = setTimeout(runLoop, nextInterval);
+        }
+      };
+
+      if (proctoringTierRef.current !== "event-only") {
+        gazeCheckIntervalRef.current = setTimeout(runLoop, 5000);
+      }
     },
-    [captureSnapshot]
+    [captureSnapshot, examId]
   );
 
   const performStart = async () => {
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
-      const { data } = await startAttempt(examId);
+      const metrics = await evaluateDeviceCapabilities();
+      proctoringTierRef.current = metrics.tier;
+
+      const { data } = await startAttempt(examId, { 
+        deviceInfo: metrics.deviceInfo,
+        proctoringTier: metrics.tier
+      });
       const { attemptId, exam, serverEndTime } = data;
 
       // Socket and WebRTC Setup
@@ -548,6 +580,9 @@ const ExamRunner = () => {
       });
 
       socket.on("faculty:request_offer", async ({ facultySocketId }) => {
+        if (proctoringTierRef.current !== "full") {
+          return; // Skip WebRTC for lower tiers
+        }
         try {
           const pc = new RTCPeerConnection({
             iceServers: [
