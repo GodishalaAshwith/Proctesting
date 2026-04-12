@@ -8,6 +8,8 @@ const QuestionSchema = new mongoose.Schema(
       required: true,
     },
     text: { type: String, required: true },
+    // Optional short tag/extra info per question (e.g., CO1, CO2)
+    additionalInfo: { type: String, default: "" },
     options: [{ type: String }], // required for choice questions
     correctAnswers: [{ type: Number }], // indexes into options (single: length 1)
     points: { type: Number, default: 1, min: 0 },

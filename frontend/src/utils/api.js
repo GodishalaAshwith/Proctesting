@@ -124,6 +124,8 @@ export const grantRetake = (examId, studentId, count = 1) =>
     { studentId, count },
     localAuthHeader()
   );
+export const getMarksheet = (examId) =>
+  API.get(`/attempts/exam/${examId}/marksheet`, localAuthHeader());
 
 /** ---------------- CONTACT ---------------- **/
 export const sendContactMessage = (payload) => API.post(`/contact`, payload);

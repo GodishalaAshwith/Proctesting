@@ -87,8 +87,9 @@ const toIndicesFromCorrect = (correctRaw, options) => {
   return Array.from(new Set(idxs)).sort((a, b) => a - b);
 };
 
-const buildQuestion = ({ type, text, options, correct, points }) => {
+const buildQuestion = ({ type, text, additionalInfo, options, correct, points }) => {
   const qText = (text || "").trim();
+  const info = (additionalInfo || "").trim();
   const pts = Number(points || 1) || 1;
   const opts = (options || []).map((o) => String(o).trim()).filter(Boolean);
 
@@ -102,6 +103,7 @@ const buildQuestion = ({ type, text, options, correct, points }) => {
     return {
       type: "text",
       text: qText,
+      additionalInfo: info,
       options: [],
       correctAnswers: [],
       points: pts,
@@ -115,13 +117,14 @@ const buildQuestion = ({ type, text, options, correct, points }) => {
   return {
     type: qType,
     text: qText,
+    additionalInfo: info,
     options: finalOpts,
     correctAnswers: corr,
     points: pts,
   };
 };
 
-// Sheets CSV/TSV parser, accepts headers: text,type,options,correct,points
+// Sheets CSV/TSV parser, accepts headers: text,type,options,correct,points,additionalInfo
 const parseFromSheets = (raw, delimiter = ",") => {
   const rows = parseCSV(raw, delimiter);
   if (!rows.length) return [];
@@ -133,6 +136,8 @@ const parseFromSheets = (raw, delimiter = ",") => {
     "options",
     "correct",
     "points",
+    "additionalinfo",
+    "info",
   ].some((h) => header.includes(h));
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const hmap = hasHeader
@@ -151,6 +156,8 @@ const parseFromSheets = (raw, delimiter = ",") => {
           ? "question"
           : 0
       );
+      const additionalInfo =
+        get("additionalinfo") || get("info") || get("co") || "";
       const type = (get("type") || "").toLowerCase();
       const rawOptions = get("options") || get(2) || "";
       const options = rawOptions
@@ -160,7 +167,7 @@ const parseFromSheets = (raw, delimiter = ",") => {
       const correct = get("correct") || get(3) || "";
       const points = get("points") || get(4) || "1";
       if (!String(text).trim()) return null;
-      return buildQuestion({ type, text, options, correct, points });
+      return buildQuestion({ type, text, additionalInfo, options, correct, points });
     })
     .filter(Boolean);
 };
@@ -235,6 +242,7 @@ const emptyQuestion = (type = "single") => {
     return {
       type: "text",
       text: "",
+      additionalInfo: "",
       options: [],
       correctAnswers: [],
       points: 1,
@@ -244,6 +252,7 @@ const emptyQuestion = (type = "single") => {
     return {
       type: "mcq",
       text: "",
+      additionalInfo: "",
       options: ["", ""],
       correctAnswers: [],
       points: 1,
@@ -252,6 +261,7 @@ const emptyQuestion = (type = "single") => {
   return {
     type: "single",
     text: "",
+    additionalInfo: "",
     options: ["", ""],
     correctAnswers: [0],
     points: 1,
@@ -474,6 +484,11 @@ const ExamEditor = () => {
     setSaving(true);
     setError("");
     try {
+      const toFiniteNumber = (value, fallback) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
       const payload = {
         title: form.title,
         description: form.description,
@@ -485,10 +500,11 @@ const ExamEditor = () => {
         questions: form.questions.map((q) => ({
           type: q.type,
           text: q.text,
+          additionalInfo: String(q.additionalInfo || "").trim(),
           options:
             q.type === "text" ? [] : (q.options || []).filter((s) => s !== ""),
           correctAnswers: q.type === "text" ? [] : q.correctAnswers || [],
-          points: Number(q.points || 1),
+          points: toFiniteNumber(q.points, 1),
         })),
         assignmentCriteria: {
           college: form.assignment.college || undefined,
@@ -588,6 +604,7 @@ const ExamEditor = () => {
     setReplaceExisting(false);
   };
 
+
   // Map agent.py output → ExamEditor question format
   const mapAIQuestion = (q) => ({
     type: q.options && q.options.length >= 2 ? "single" : "text",
@@ -660,10 +677,12 @@ const ExamEditor = () => {
     setAutofillSearch("");
   };
 
-  const sampleCSV = `text,type,options,correct,points
-What is 2+2?,single,2 | 3 | 4 | 5,3,1
-Select prime numbers,mcq,2 | 3 | 4 | 5,"A,B",3
-Explain Newton's second law,text,,,5`;
+ 
+  const sampleCSV = `text,additionalInfo,type,options,correct,points
+What is 2+2?,CO1,single,2 | 3 | 4 | 5,3,1
+Select prime numbers,CO2,mcq,2 | 3 | 4 | 5,"A,B",3
+Explain Newton's second law,,text,,,5`;
+
 
   const sampleDocs = `Q: What is 2+2?
 A) 2
@@ -1176,14 +1195,27 @@ Points: 5`;
                     }
                   />
                   <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-700">Info</label>
+                    <input
+                      className="border rounded-md w-28 px-3 py-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      placeholder="CO1"
+                      value={q.additionalInfo || ""}
+                      onChange={(e) =>
+                        updateQuestion(idx, { additionalInfo: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
                     <label className="text-sm text-slate-700">Points</label>
                     <input
                       type="number"
                       min="0"
+                      step="any"
+                      inputMode="decimal"
                       className="border rounded-md w-24 px-3 py-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
                       value={q.points}
                       onChange={(e) =>
-                        updateQuestion(idx, { points: Number(e.target.value) })
+                        updateQuestion(idx, { points: e.target.value })
                       }
                     />
                   </div>
@@ -1423,7 +1455,7 @@ Points: 5`;
                     className="w-full px-3 py-2 rounded-md border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     placeholder={
                       importMode === "sheets"
-                        ? 'text,type,options,correct,points\nWhat is 2+2?,single,2 | 3 | 4 | 5,3,1\nSelect prime numbers,mcq,2 | 3 | 4 | 5,"A,B",3\nExplain Newton\'s second law,text,,,5'
+                        ? 'text,additionalInfo,type,options,correct,points\nWhat is 2+2?,CO1,single,2 | 3 | 4 | 5,3,1\nSelect prime numbers,CO2,mcq,2 | 3 | 4 | 5,"A,B",3\nExplain Newton\'s second law,,text,,,5'
                         : "Q: What is 2+2?\nA) 2\nB) 3\nC) 4\nD) 5\nCorrect: C\nPoints: 1"
                     }
                   />
@@ -1466,9 +1498,15 @@ Points: 5`;
                       className="border border-slate-200 rounded-md p-3"
                     >
                       <div className="text-xs uppercase tracking-wide text-slate-500">
-                        {q.type} • {q.points} pt{q.points > 1 ? "s" : ""}
+                        {q.type} • {q.points} pt{Number(q.points) > 1 ? "s" : ""}
                       </div>
                       <div className="text-slate-900 font-medium overflow-x-auto"><MarkdownRenderer content={q.text} /></div>
+                      <div className="text-slate-900 font-medium">{q.text}</div>
+                      {q.additionalInfo ? (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {q.additionalInfo}
+                        </div>
+                      ) : null}
                       {q.options?.length ? (
                         <ul className="mt-1 text-sm text-slate-700 list-disc pl-5">
                           {q.options.map((o, oi) => (
