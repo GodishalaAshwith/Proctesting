@@ -71,6 +71,7 @@ const ExamRunner = () => {
   const peerConnectionRef = useRef(null);
   const autoSubmitEnabledRef = useRef(true);
   const proctoringTierRef = useRef("full");
+  const handleSubmitRef = useRef(null);
 
   const requestFullscreen = async () => {
     const el = document.documentElement;
@@ -170,6 +171,11 @@ const ExamRunner = () => {
     },
     [state.attemptId, state.submitted]
   );
+
+  // Keep ref in sync so socket/timer callbacks always call the latest version
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  }, [handleSubmit]);
 
   const confirmSubmit = async () => {
     if (isSubmittingRef.current) return;
@@ -603,7 +609,9 @@ const ExamRunner = () => {
       });
 
       socket.on("faculty:force_submit", () => {
-        handleSubmit(true);
+        // Use ref to avoid stale closure - handleSubmit captured at socket
+        // setup time has state.attemptId === null
+        if (handleSubmitRef.current) handleSubmitRef.current(true);
       });
 
       socket.on("faculty:request_offer", async ({ facultySocketId }) => {
