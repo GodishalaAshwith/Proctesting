@@ -168,35 +168,44 @@ const FacultyLiveView = () => {
     });
 
     socket.on("webrtc:offer", async ({ senderSocketId, offer, studentId, studentName }) => {
-      let pc = peersRef.current[studentId];
-      if (!pc) {
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-        peersRef.current[studentId] = pc;
-
-        pc.ontrack = (event) => {
-          updateStudent(studentId, { stream: event.streams[0] });
-        };
-
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            socket.emit("webrtc:candidate", {
-              targetSocketId: senderSocketId,
-              candidate: event.candidate,
-            });
-          }
-        };
+      // If an existing peer connection exists for this student, close it
+      // and create a fresh one. A reused PC in 'stable' state cannot
+      // accept a new offer, which causes the video to never connect.
+      if (peersRef.current[studentId]) {
+        try { peersRef.current[studentId].close(); } catch {}
+        delete peersRef.current[studentId];
       }
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      socket.emit("webrtc:answer", {
-        targetSocketId: senderSocketId,
-        answer,
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
+      peersRef.current[studentId] = pc;
+
+      pc.ontrack = (event) => {
+        updateStudent(studentId, { stream: event.streams[0] });
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("webrtc:candidate", {
+            targetSocketId: senderSocketId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit("webrtc:answer", {
+          targetSocketId: senderSocketId,
+          answer,
+        });
+      } catch (e) {
+        console.error("Failed to process WebRTC offer for", studentId, e);
+      }
     });
 
     socket.on("webrtc:candidate", async ({ senderSocketId, candidate }) => {

@@ -616,6 +616,13 @@ const ExamRunner = () => {
 
       socket.on("faculty:request_offer", async ({ facultySocketId }) => {
         try {
+          // Close any existing peer connection to avoid race conditions
+          // when multiple request_offer events arrive in quick succession
+          if (peerConnectionRef.current) {
+            try { peerConnectionRef.current.close(); } catch {}
+            peerConnectionRef.current = null;
+          }
+
           const pc = new RTCPeerConnection({
             iceServers: [
               { urls: "stun:stun.l.google.com:19302" }
@@ -641,6 +648,11 @@ const ExamRunner = () => {
           };
 
           const offer = await pc.createOffer();
+          // Verify this PC is still the current one (another request_offer may have replaced it)
+          if (peerConnectionRef.current !== pc) {
+            pc.close();
+            return;
+          }
           await pc.setLocalDescription(offer);
           socket.emit("webrtc:offer", {
             targetSocketId: facultySocketId,
@@ -654,14 +666,23 @@ const ExamRunner = () => {
       });
 
       socket.on("webrtc:answer", async ({ answer }) => {
-        if (peerConnectionRef.current) {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        const pc = peerConnectionRef.current;
+        if (pc && pc.signalingState === "have-local-offer") {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          } catch (e) {
+            console.error("Failed to set remote answer:", e);
+          }
         }
       });
 
       socket.on("webrtc:candidate", async ({ candidate }) => {
         if (peerConnectionRef.current) {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          try {
+            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error("Failed to add ICE candidate:", e);
+          }
         }
       });
 
