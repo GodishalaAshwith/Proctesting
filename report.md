@@ -1,6 +1,6 @@
 # ProcteredMERN Project Report
 
-Date: April 8, 2026
+Date: April 16, 2026
 
 ## 1. Project Summary
 
@@ -15,104 +15,46 @@ The system supports role-based workflows for:
 - Faculty
 - Student
 
-It includes exam authoring, assignment-based delivery, timed attempts, anti-cheat event logging, live invigilation, retake controls, bulk student roster upload, and contact/email functionality.
+It includes exam authoring, assignment-based delivery, timed attempts, anti-cheat event logging, live invigilation, retake controls, bulk student roster upload, contact/email functionality, blockchain-based submission integrity verification, per-attempt integrity scoring, Markdown/LaTeX question rendering, question paper PDF generation, detailed marksheet exports, and global faculty violation alert notifications.
 
 ## 2. High-Level Architecture
 
 ```mermaid
-flowchart TB
+flowchart TD
+    C["Client Layer\nStudent · Faculty · Admin\nReact SPA · Desktop · Mobile\nP2P WebRTC Video Stream"]
 
-    %% ── Client Layer ──────────────────────────────────────────
-    subgraph CLIENT ["Client Layer"]
-        direction LR
-        SC["Student Client\n(React SPA — Desktop / Mobile)"]
-        FC["Faculty Client\n(React SPA — Live Dashboard)"]
-        AC["Admin Client\n(React SPA — Management Panel)"]
-    end
+    C -->|"HTTPS · WebSocket"| G
 
-    SC -. "P2P WebRTC\nVideo Stream" .-> FC
+    G["API Gateway\nExpress.js\nREST Routes · Socket.IO"]
 
-    %% ── Communication Protocols ───────────────────────────────
-    subgraph COMM ["Communication Layer"]
-        direction LR
-        REST["HTTPS REST API\n(Axios)"]
-        WS["WebSocket\n(Socket.IO)"]
-        SIGNAL["WebRTC Signaling\n(Socket.IO Relay)"]
-    end
+    G --> A
 
-    CLIENT -->|"HTTP / WSS"| COMM
+    A["Authentication\nJWT Token Issuing\nRole-Based Access Control"]
 
-    %% ── Application Server ───────────────────────────────────
-    subgraph SERVER ["Application Server — Node.js + Express"]
-        direction TB
+    A --> S
 
-        subgraph AUTH ["Auth Module"]
-            JWT["JWT Issuing\n& Validation"]
-            RBAC["Role-Based\nAccess Control"]
-        end
+    S["Core Services\nExam CRUD · Attempt Lifecycle\nScoring · Retakes · Scheduler\nSocket.IO Signaling · Email"]
 
-        subgraph EXAM_MOD ["Exam Module"]
-            EXAM_CTRL["Exam CRUD\n& Assignment"]
-            ATTEMPT_CTRL["Attempt Lifecycle\n(Start / Save / Submit / Score)"]
-            RETAKE["Retake Grant\nManagement"]
-        end
+    S --> P
 
-        subgraph PROCTOR_MOD ["Proctoring Module"]
-            EVT_LOG["Violation Event\nLogger"]
-            SIO_SRV["Socket.IO\nSignaling Server"]
-            FORCE["Remote Intervention\n(Force Submit)"]
-        end
+    P["Proctoring Engine\nViolation Event Logger\nForce Submit · Alerts\nWebRTC Relay"]
 
-        subgraph AI_MOD ["AI Orchestrator"]
-            ORCH["Node Orchestrator\n(child_process)"]
-        end
+    P -->|"Image Frames"| F
 
-        SCHED["Academic Promotion\nScheduler (12 h)"]
-        CONTACT["Contact / Email\n(Brevo API)"]
-    end
+    F["Face and Gaze Service\nPython FastAPI\ndlib Encoding · MediaPipe Mesh"]
 
-    COMM --> SERVER
+    S -->|"Prompt Context"| AI
 
-    %% ── External Python Services ─────────────────────────────
-    subgraph PYTHON ["Python Microservices"]
-        direction TB
+    AI["AI Question Generator\nPython LangChain Agent\nFAISS Index · Ollama Llama 3.2"]
 
-        subgraph FACE_SVC ["Face & Gaze Service — FastAPI"]
-            FACE_REG["Face Registration\n(dlib Encoding)"]
-            FACE_CHK["Face Verification\n(No / Wrong / Multiple)"]
-            GAZE["Gaze Tracking\n(MediaPipe Mesh)"]
-        end
+    S --> DB
+    P --> DB
+    F -.->|"Results"| P
 
-        subgraph AI_SVC ["AI Question Generator — Python Agent"]
-            RAG["RAG Agent\n(LangChain)"]
-            FAISS["FAISS\nVector Index"]
-            LLM["Ollama\n(Llama 3.2)"]
-            RAG --> FAISS
-            RAG --> LLM
-        end
-    end
-
-    EVT_LOG -->|"POST image frames"| FACE_SVC
-    ORCH -->|"Spawns agent.py\nwith prompt context"| AI_SVC
-
-    %% ── Data Layer ───────────────────────────────────────────
-    subgraph DATA ["Data Layer — MongoDB Atlas"]
-        direction LR
-        USERS[("Users")]
-        STUDENTS[("Students\n(Roster)")]
-        EXAMS[("Exams")]
-        ATTEMPTS[("Attempts")]
-        PROCTOR_EVENTS[("Proctoring\nEvents")]
-    end
-
-    SERVER -->|"Mongoose ODM"| DATA
-
-    %% ── Key cross-cuts ───────────────────────────────────────
-    SIO_SRV -->|"Violation alerts\n& Force Submit"| FC
-    SC -->|"Proctoring events\n& WebRTC offer"| SIO_SRV
+    DB[("MongoDB Atlas\nUsers · Students\nExams · Attempts\nProctoringEvents")]
 ```
 
-**Figure 1.** System architecture of the ProcteredMERN platform. The five layers are: **(1) Client Layer** — role-specific React SPAs for students, faculty, and admin with peer-to-peer WebRTC video streaming; **(2) Communication Layer** — HTTPS REST, WebSocket (Socket.IO), and WebRTC signaling channels; **(3) Application Server** — Node.js/Express backend handling authentication (JWT + RBAC), exam/attempt lifecycle, proctoring event logging, remote interventions, AI orchestration, academic promotion scheduling, and email; **(4) Python Microservices** — FastAPI face/gaze analysis service (dlib, MediaPipe) and RAG-based AI question generator (LangChain, FAISS, Ollama); **(5) Data Layer** — MongoDB Atlas storing Users, Students, Exams, Attempts, and ProctoringEvents.
+**Figure 1.** System architecture of ProcteredMERN. **(1) Client Layer** — React SPAs for student, faculty, and admin with P2P WebRTC streaming. **(2) API Gateway** — Express.js handling REST and Socket.IO. **(3) Authentication** — JWT with role-based access. **(4) Core Services** — exam/attempt lifecycle, scoring, signaling, scheduling. **(5) Proctoring Engine** — violation logging, force submit, WebRTC relay. **(6) Python Services** — FastAPI face/gaze (dlib, MediaPipe) and RAG-based AI question generator (LangChain, FAISS, Ollama). **(7) Data Layer** — MongoDB Atlas.
 
 ### Frontend (React + Vite)
 - Role-based routes and guarded pages with dynamic environment configuration.
@@ -177,15 +119,20 @@ flowchart TB
   - Add, duplicate, remove
   - Option add/remove
   - Correct answer selection
+  - Optional `additionalInfo` tag per question (e.g., CO1, CO2 for outcome mapping)
 - Exam metadata:
   - Title, description, duration
   - Window start/end scheduling
+  - Configurable proctoring tier per exam (`full` / `snapshot` / `event-only`)
 - Assignment criteria:
   - College
   - Year list
   - Department list
   - Section list
   - Semester list
+- Markdown + LaTeX support:
+  - Question text and options rendered via ReactMarkdown with remark-math and rehype-katex
+  - Enables inline math (`$x^2$`), block equations (`$$\sum$$`), tables, code blocks in questions
 
 3. Question ingestion workflows
 - Import from pasted/file content:
@@ -198,15 +145,24 @@ flowchart TB
 4. Submissions and review
 - View all attempts for an exam
 - View score/status/violation count/student info
-- Open detailed proctoring event timeline per attempt
+- View per-attempt **Integrity Score** (0–100, penalty-weighted from violation types)
+- View per-attempt **Blockchain Hash** (SHA-256 tamper-detection fingerprint)
+- One-click **Verify Hash** button to compare stored hash against live recalculation and detect data tampering
+- Open detailed proctoring event timeline per attempt (with penalty scores and confidence values)
 - Grant retake counts to specific students
 
 5. Export capabilities
-- CSV export of submissions
-- Excel export (.xlsx) of submissions
-- Current export format in implementation focuses on:
-  - RollNo
-  - Marks
+- CSV export of submissions (RollNo + Marks)
+- Excel export (.xlsx) of submissions (RollNo + Marks)
+- **Marksheet export** (.xlsx) — per-question marks breakdown:
+  - Columns: RollNo, Q1 (CO info), Q2 (CO info), ..., Total
+  - Frozen header row and RollNo column, auto-filter enabled
+  - One row per student (latest submitted attempt de-duplicated)
+- **Question Paper PDF export** — jsPDF-based formatted document:
+  - Exam title, duration, total marks header
+  - Numbered questions with options (lettered A, B, C...) and marks per question
+  - Ruled lines for text/essay answers
+  - Multi-page support with automatic page breaks
 
 6. Live proctoring view
 - Real-time student stream monitoring via WebRTC, robustly supporting mobile connections.
@@ -214,7 +170,16 @@ flowchart TB
 - Live violation alerts in chronological event grids.
 - Event log timeline per student.
 - Faculty control to toggle auto-submit behavior for students (propagated via Socket.IO).
-- **Remote Interventions**: Faculty can forcefully submit a specific student's exam remotely.
+- **Remote Interventions**:
+  - Faculty can send custom warning messages to specific students (displayed as an overlay)
+  - Faculty can forcefully submit a specific student's exam remotely (Force Submit)
+
+7. Global live alert notifications
+- `FacultyLiveAlerts` component renders floating toast-style notifications on any page
+- Faculty socket authenticates globally via `faculty:authenticate` event
+- Server forwards `faculty:alert` events when any student triggers a violation in any owned exam
+- Auto-dismiss after 10 seconds, with de-duplication to prevent spam
+- Each alert includes a direct "Monitor Live" link to jump into the live proctoring dashboard
 
 ## 3.3 Student Features
 
@@ -223,9 +188,11 @@ flowchart TB
 - User-model login path also supported for students/faculty/admin
 
 2. Dashboard and exam discovery
-- Role-specific dashboard cards and summaries
+- Role-specific dashboard cards and summaries (available/in-progress/submitted counts)
 - Available exams list with upcoming/active distinctions
 - Live countdown timers for upcoming exams, dynamically unlocking exams precisely at window start
+- Dashboard auto-refreshes every 15 seconds via light polling
+- Refetches on tab/window focus via visibility change and focus event listeners
 
 3. Exam taking workflow
 - Start/resume attempt
@@ -271,15 +238,35 @@ Proctoring events are persisted in two places:
 - `Attempt.violations` summary array
 - `ProctoringEvent` dedicated collection for timeline queries
 
-### 4.3 Auto-Submit Behavior
+### 4.3 Integrity Score (Penalty-Based)
+On submission, the system calculates an integrity score (0–100) by applying configurable penalty weights per violation type:
+- `face-mismatch` / `face-multiple`: 30 points each
+- `face-absent`: 15 points
+- `visibility-hidden` / `fullscreen-exit` / `window-resize`: 10 points each
+- `gaze-no-face`: 10 points
+- `tab-blur` / `gaze-away`: 5 points each
+- Other/unknown violations: 2 points
+
+Integrity score is displayed with color-coded badges (green ≥ 80, yellow ≥ 50, red < 50) in the faculty submissions view.
+
+### 4.4 Blockchain-Based Submission Integrity (SHA-256 Hashing)
+On every exam submission:
+1. A deterministic payload is constructed from: `attemptId`, `studentId`, `examId`, `score`, `integrityScore`, `violationsCount`, and full `answers` array.
+2. A SHA-256 hash is computed via Node.js `crypto` and stored as `blockchainHash` on the Attempt document.
+3. Faculty can verify integrity at any time via `POST /api/attempts/:id/verify-hash`, which re-computes the hash from current DB data and compares it against the stored hash.
+4. The frontend provides a one-click **Verify Hash** button per attempt that reports verification success or flags tampering.
+
+This provides a decentralized-style tamper detection mechanism ensuring that scores, answers, and violation counts have not been altered post-submission.
+
+### 4.5 Auto-Submit Behavior
 - Exam runner tracks serious violations and can auto-submit after configured thresholds
 - Faculty can toggle auto-submit in live proctor dashboard and broadcast setting to active student sessions
 
-### 4.4 Device-Aware Proctoring Tiers
-Client-side device evaluation assigns tiers:
-- full
-- snapshot
-- event-only
+### 4.6 Device-Aware Proctoring Tiers
+Proctoring tier can be configured both per-exam (by faculty) and per-attempt (by client device evaluation):
+- `full` — all proctoring features active
+- `snapshot` — periodic frame captures only
+- `event-only` — behavioral event logging only (no camera)
 
 Tier is sent to backend and stored per attempt.
 
@@ -340,9 +327,11 @@ Tier is sent to backend and stored per attempt.
 - Answers, score, manualNeeded
 - Device info and proctoring tier
 - Violation summary
+- `integrityScore` (0–100, penalty-weighted)
+- `blockchainHash` (SHA-256 submission fingerprint)
 
 5. ProctoringEvent
-- Event timeline with type, timestamp, metadata
+- Event timeline with type, timestamp, metadata (includes penalty_score, confidence values)
 
 ## 8. API Surface (Implemented)
 
@@ -374,11 +363,13 @@ Tier is sent to backend and stored per attempt.
 ### Attempts
 - POST /api/attempts/start
 - POST /api/attempts/save
-- POST /api/attempts/submit
+- POST /api/attempts/submit — also computes integrityScore and blockchainHash
 - GET /api/attempts/:id
 - POST /api/attempts/:id/proctor
+- POST /api/attempts/:id/verify-hash — re-computes SHA-256 and verifies against stored hash
 - GET /api/attempts/:id/events
-- GET /api/attempts/exam/:examId/attempts
+- GET /api/attempts/exam/:examId/attempts — returns integrityScore and blockchainHash per attempt
+- GET /api/attempts/exam/:examId/marksheet — per-question marks grid with RollNo, Q columns, and Total
 - POST /api/attempts/exam/:examId/grant-retake
 
 ### Face/Gaze Proxy
@@ -401,19 +392,25 @@ Tier is sent to backend and stored per attempt.
 ## 9. Real-Time and Streaming Features
 
 1. Socket.IO channels/events
-- Faculty join exam rooms
-- Student join exam rooms
-- Violation forwarding from student to faculty room
-- Auto-submit config broadcast from faculty to students
+- `faculty:join` — faculty joins an exam-specific live room
+- `faculty:authenticate` — faculty authenticates globally for cross-exam alert notifications
+- `student:join` — student joins an exam room with identity info
+- `student:violation` — violation forwarding from student to faculty room
+- `student:joined` / `student:left` — presence tracking in faculty dashboard
+- `faculty:alert` — global violation alert pushed to faculty owner on any page
+- `faculty:warning` — faculty sends a custom warning message overlay to a specific student
+- `faculty:force_submit` — faculty triggers forced submission on a specific student
+- `faculty:toggle_autosubmit` / `config:autosubmit` — auto-submit config broadcast
 - WebRTC signaling relay:
-  - faculty:request_offer
-  - webrtc:offer
-  - webrtc:answer
-  - webrtc:candidate
+  - `faculty:request_offer`
+  - `webrtc:offer`
+  - `webrtc:answer`
+  - `webrtc:candidate`
 
 2. WebRTC
 - Student streams camera feed to faculty during active exam monitoring
 - Faculty dashboard can pin and monitor selected student feeds
+- STUN server configured (`stun:stun.l.google.com:19302`) for NAT traversal
 
 ## 10. AI Question Generation Details
 
@@ -474,11 +471,15 @@ Automatic academic promotion runner:
 - Tailwind CSS v4
 - Lucide icons, AOS animations
 - XLSX for exports
+- jsPDF for question paper PDF generation
+- ReactMarkdown + remark-math + rehype-katex for Markdown/LaTeX rendering
 - Socket.IO client
+- PropTypes for component validation
 
 ### Backend
 - Express, Mongoose
 - JWT, bcryptjs
+- Node.js `crypto` (SHA-256 blockchain hashing)
 - Multer, node-fetch, form-data
 - Socket.IO
 - XLSX
@@ -491,34 +492,45 @@ Automatic academic promotion runner:
 
 ### AI Services
 - LangChain
-- Ollama local models
+- Ollama local models (Llama 3.2)
 - FAISS vector index
 
 ## 15. Current Functional Scope and Notes
 
 1. Strongly implemented areas
 - Multi-role workflow and access control
-- Exam authoring + assignment criteria
+- Exam authoring + assignment criteria with Markdown/LaTeX support
 - Timed attempts with autosave and scoring
 - Face + gaze proctor event flow
 - Real-time faculty live invigilation with WebRTC
 - Admin bulk roster upload and account management
 - AI-assisted question generation from textbook datastore
+- Blockchain-based SHA-256 submission integrity verification
+- Per-attempt integrity scoring with penalty-weighted violation analysis
+- Marksheet and question paper PDF export capabilities
+- Global faculty violation alert notifications across all pages
+- Remote intervention capabilities (warning messages, force submit)
+- Dashboard live polling and focus-based refresh
 
 2. Practical implementation notes
 - Contact uses Brevo API key; without it, endpoint returns config error
 - Frontend env variable naming appears in multiple forms in docs and code (`VITE_API_BASE`, `VITE_API_BASE_URL`); align during deployment to avoid mismatched base URLs
 - Student profile is read-only in current UI (roster-managed)
 - No automated test suite is currently defined in project scripts
+- Blockchain hashing uses server-side SHA-256; not an on-chain smart contract but provides equivalent tamper-detection guarantees for a centralized deployment
 
 ## 16. Conclusion
 
-This project is an implemented, production-oriented proctored exam platform with:
+This project is a fully implemented, production-oriented proctored exam platform with:
 - End-to-end exam lifecycle management
-- Role-specific dashboards and controls
-- Layered anti-cheat protections
-- Real-time live proctoring
-- AI-assisted exam authoring
+- Role-specific dashboards and controls with live polling
+- Layered anti-cheat protections with integrity scoring
+- Blockchain-inspired SHA-256 submission tamper detection
+- Real-time live proctoring with remote interventions
+- AI-assisted exam authoring with RAG guardrails
+- Markdown + LaTeX question rendering with PDF export
+- Detailed marksheet export with per-question scoring
+- Global faculty alert notification system
 - Supporting admin and deployment workflows
 
-Overall, the codebase already contains substantial functionality across security, usability, and operational tooling, and can be further extended with automated tests, analytics, and deeper grading workflows.
+Overall, the codebase contains comprehensive functionality across security, integrity verification, usability, and operational tooling, and can be further extended with automated tests, analytics, and deeper grading workflows.
