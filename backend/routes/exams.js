@@ -98,7 +98,7 @@ router.get(
         "window.end": { $gte: now },
       })
         .select(
-          "title description durationMins window assignmentCriteria retakeGrants"
+          "title description durationMins window assignmentCriteria proctoringTier retakeGrants"
         )
         .sort({ "window.start": 1 });
 

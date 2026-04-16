@@ -19,27 +19,122 @@ It includes exam authoring, assignment-based delivery, timed attempts, anti-chea
 
 ## 2. High-Level Architecture
 
+```mermaid
+flowchart TB
+
+    %% ── Client Layer ──────────────────────────────────────────
+    subgraph CLIENT ["Client Layer"]
+        direction LR
+        SC["Student Client\n(React SPA — Desktop / Mobile)"]
+        FC["Faculty Client\n(React SPA — Live Dashboard)"]
+        AC["Admin Client\n(React SPA — Management Panel)"]
+    end
+
+    SC -. "P2P WebRTC\nVideo Stream" .-> FC
+
+    %% ── Communication Protocols ───────────────────────────────
+    subgraph COMM ["Communication Layer"]
+        direction LR
+        REST["HTTPS REST API\n(Axios)"]
+        WS["WebSocket\n(Socket.IO)"]
+        SIGNAL["WebRTC Signaling\n(Socket.IO Relay)"]
+    end
+
+    CLIENT -->|"HTTP / WSS"| COMM
+
+    %% ── Application Server ───────────────────────────────────
+    subgraph SERVER ["Application Server — Node.js + Express"]
+        direction TB
+
+        subgraph AUTH ["Auth Module"]
+            JWT["JWT Issuing\n& Validation"]
+            RBAC["Role-Based\nAccess Control"]
+        end
+
+        subgraph EXAM_MOD ["Exam Module"]
+            EXAM_CTRL["Exam CRUD\n& Assignment"]
+            ATTEMPT_CTRL["Attempt Lifecycle\n(Start / Save / Submit / Score)"]
+            RETAKE["Retake Grant\nManagement"]
+        end
+
+        subgraph PROCTOR_MOD ["Proctoring Module"]
+            EVT_LOG["Violation Event\nLogger"]
+            SIO_SRV["Socket.IO\nSignaling Server"]
+            FORCE["Remote Intervention\n(Force Submit)"]
+        end
+
+        subgraph AI_MOD ["AI Orchestrator"]
+            ORCH["Node Orchestrator\n(child_process)"]
+        end
+
+        SCHED["Academic Promotion\nScheduler (12 h)"]
+        CONTACT["Contact / Email\n(Brevo API)"]
+    end
+
+    COMM --> SERVER
+
+    %% ── External Python Services ─────────────────────────────
+    subgraph PYTHON ["Python Microservices"]
+        direction TB
+
+        subgraph FACE_SVC ["Face & Gaze Service — FastAPI"]
+            FACE_REG["Face Registration\n(dlib Encoding)"]
+            FACE_CHK["Face Verification\n(No / Wrong / Multiple)"]
+            GAZE["Gaze Tracking\n(MediaPipe Mesh)"]
+        end
+
+        subgraph AI_SVC ["AI Question Generator — Python Agent"]
+            RAG["RAG Agent\n(LangChain)"]
+            FAISS["FAISS\nVector Index"]
+            LLM["Ollama\n(Llama 3.2)"]
+            RAG --> FAISS
+            RAG --> LLM
+        end
+    end
+
+    EVT_LOG -->|"POST image frames"| FACE_SVC
+    ORCH -->|"Spawns agent.py\nwith prompt context"| AI_SVC
+
+    %% ── Data Layer ───────────────────────────────────────────
+    subgraph DATA ["Data Layer — MongoDB Atlas"]
+        direction LR
+        USERS[("Users")]
+        STUDENTS[("Students\n(Roster)")]
+        EXAMS[("Exams")]
+        ATTEMPTS[("Attempts")]
+        PROCTOR_EVENTS[("Proctoring\nEvents")]
+    end
+
+    SERVER -->|"Mongoose ODM"| DATA
+
+    %% ── Key cross-cuts ───────────────────────────────────────
+    SIO_SRV -->|"Violation alerts\n& Force Submit"| FC
+    SC -->|"Proctoring events\n& WebRTC offer"| SIO_SRV
+```
+
+**Figure 1.** System architecture of the ProcteredMERN platform. The five layers are: **(1) Client Layer** — role-specific React SPAs for students, faculty, and admin with peer-to-peer WebRTC video streaming; **(2) Communication Layer** — HTTPS REST, WebSocket (Socket.IO), and WebRTC signaling channels; **(3) Application Server** — Node.js/Express backend handling authentication (JWT + RBAC), exam/attempt lifecycle, proctoring event logging, remote interventions, AI orchestration, academic promotion scheduling, and email; **(4) Python Microservices** — FastAPI face/gaze analysis service (dlib, MediaPipe) and RAG-based AI question generator (LangChain, FAISS, Ollama); **(5) Data Layer** — MongoDB Atlas storing Users, Students, Exams, Attempts, and ProctoringEvents.
+
 ### Frontend (React + Vite)
-- Role-based routes and guarded pages
-- Pages for admin/faculty/student workflows
-- Exam runner with proctoring controls and autosave
-- Faculty live view with real-time student streams and violation alerts
+- Role-based routes and guarded pages with dynamic environment configuration.
+- Pages for admin/faculty/student workflows.
+- Exam runner with layered proctoring controls, upcoming exam countdowns, autosave, and enhanced mobile device support.
+- Faculty live view with real-time WebRTC student streams, violation alerts, and remote intervention capabilities (e.g., Force Submit).
 
 ### Backend (Express + MongoDB)
-- JWT authentication and role authorization
-- REST APIs for auth, admin, exams, attempts, proctoring, AI, and contact
-- Socket.IO signaling for live proctoring
-- Scheduler for semester/year promotion cycles
+- JWT authentication and role authorization.
+- REST APIs for auth, admin, exams, attempts, proctoring, AI, and contact.
+- Socket.IO signaling to handle live proctoring feeds and remote interventions.
+- Scheduler for semester/year promotion cycles.
 
 ### Python Microservice (FastAPI)
-- Face registration and face verification endpoints
-- Proctoring classification (no face / wrong face / multiple faces)
-- Gaze tracking session endpoints (frame, summary, end, active)
+- Face registration and face verification endpoints.
+- Proctoring classification (no face / wrong face / multiple faces).
+- Gaze tracking session endpoints (frame, summary, end, active).
 
 ### AI Service
-- Node orchestrator executes Python AI agent
-- AI agent uses local Ollama models + FAISS textbook retrieval
-- Generates structured questions from context-limited source material
+- Node orchestrator executes Python AI agent.
+- AI agent uses local Ollama models (e.g. Llama 3.2) + FAISS textbook retrieval for RAG-based context parsing.
+- Generates structured questions from context-limited source material without hallucinating missing data.
 
 ## 3. Implemented Features (By User Role)
 
@@ -114,11 +209,12 @@ It includes exam authoring, assignment-based delivery, timed attempts, anti-chea
   - Marks
 
 6. Live proctoring view
-- Real-time student stream monitoring via WebRTC
-- Pinned student focus mode
-- Violation alerts in live grid
-- Event log timeline per student
-- Faculty control to toggle auto-submit behavior for students (propagated via Socket.IO)
+- Real-time student stream monitoring via WebRTC, robustly supporting mobile connections.
+- Pinned student focus mode to monitor specific suspicious users.
+- Live violation alerts in chronological event grids.
+- Event log timeline per student.
+- Faculty control to toggle auto-submit behavior for students (propagated via Socket.IO).
+- **Remote Interventions**: Faculty can forcefully submit a specific student's exam remotely.
 
 ## 3.3 Student Features
 
@@ -129,7 +225,7 @@ It includes exam authoring, assignment-based delivery, timed attempts, anti-chea
 2. Dashboard and exam discovery
 - Role-specific dashboard cards and summaries
 - Available exams list with upcoming/active distinctions
-- Countdown and exam window awareness
+- Live countdown timers for upcoming exams, dynamically unlocking exams precisely at window start
 
 3. Exam taking workflow
 - Start/resume attempt
@@ -148,9 +244,9 @@ It includes exam authoring, assignment-based delivery, timed attempts, anti-chea
 
 5. Camera-based verification and monitoring
 - Face capture required before exam start
-- Continuous face checks during attempt
-- Continuous gaze checks during attempt
-- On-screen proctoring status indicator and violation overlays
+- Continuous face checks during attempt via background tasks
+- Continuous gaze checks ("gaze-away" and "gaze-no-face") during attempt
+- On-screen proctoring status indicators and dismissible violation overlays optimized for desktop and mobile UX.
 
 6. Student profile
 - Read-only profile view pulled from roster-linked data

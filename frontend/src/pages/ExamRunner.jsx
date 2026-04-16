@@ -544,7 +544,6 @@ const ExamRunner = () => {
     setState((s) => ({ ...s, loading: true, error: "" }));
     try {
       const metrics = await evaluateDeviceCapabilities();
-      proctoringTierRef.current = metrics.tier;
 
       const { data } = await startAttempt(examId, { 
         deviceInfo: metrics.deviceInfo,
@@ -552,8 +551,20 @@ const ExamRunner = () => {
       });
       const { attemptId, exam, serverEndTime } = data;
 
+      const facultyTier = exam.proctoringTier || "full";
+      const tierLevels = { "event-only": 0, "snapshot": 1, "full": 2 };
+      const chosenTier = tierLevels[facultyTier] < tierLevels[metrics.tier] ? facultyTier : metrics.tier;
+      proctoringTierRef.current = chosenTier;
+
+      // Populate student ID reference early for socket usage
+      const storedUser = localStorage.getItem("user");
+      if (storedUser) {
+        const u = JSON.parse(storedUser);
+        studentIdRef.current = u.rollno || u.email || u._id || "";
+      }
+
       // Socket and WebRTC Setup
-      const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+      const socket = io(import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000`, {
         transports: ["websocket"],
       });
       socketRef.current = socket;
@@ -579,10 +590,23 @@ const ExamRunner = () => {
         autoSubmitEnabledRef.current = enabled;
       });
 
+      socket.on("faculty:warning", ({ message }) => {
+        setState((s) => ({
+          ...s,
+          overlay: {
+            reason: "faculty-warning",
+            until: Date.now() + 10000,
+            message: message
+          }
+        }));
+        registerViolation("faculty-warning", { message });
+      });
+
+      socket.on("faculty:force_submit", () => {
+        handleSubmit(true);
+      });
+
       socket.on("faculty:request_offer", async ({ facultySocketId }) => {
-        if (proctoringTierRef.current !== "full") {
-          return; // Skip WebRTC for lower tiers
-        }
         try {
           const pc = new RTCPeerConnection({
             iceServers: [
@@ -590,6 +614,13 @@ const ExamRunner = () => {
             ],
           });
           peerConnectionRef.current = pc;
+
+          // Wait until the webcam stream is acquired on slower/mobile devices
+          let waitCycles = 0;
+          while (!streamRef.current && waitCycles < 20) {
+             await new Promise(r => setTimeout(r, 500));
+             waitCycles++;
+          }
 
           if (streamRef.current) {
             streamRef.current.getTracks().forEach((track) => pc.addTrack(track, streamRef.current));
@@ -1077,6 +1108,10 @@ const ExamRunner = () => {
                 detail:
                   "Please ensure you are sitting correctly so the webcam can track your gaze.",
               },
+              "faculty-warning": {
+                title: "Warning from Proctor",
+                detail: state.overlay.message || "Please fix your behavior immediately.",
+              },
             };
             const v = map[state.overlay.reason] || {
               title: "Activity outside the exam detected",
@@ -1104,12 +1139,7 @@ const ExamRunner = () => {
             className="bg-white text-black px-4 py-2 rounded"
             onClick={async () => {
               await requestFullscreen();
-              // For face-related violations, clear the overlay immediately
-              // so the student can resume. The background loop will re-trigger
-              // if the violation persists on the next check.
-              if (state.overlay?.reason?.startsWith("face-")) {
-                setState(s => ({ ...s, overlay: null }));
-              }
+              setState(s => ({ ...s, overlay: null }));
             }}
           >
             Return now

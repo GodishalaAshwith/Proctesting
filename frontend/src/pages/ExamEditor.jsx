@@ -279,6 +279,7 @@ const ExamEditor = () => {
     title: "",
     description: "",
     durationMins: 60,
+    proctoringTier: "full",
     windowStart: "",
     windowEnd: "",
     assignment: {
@@ -346,6 +347,7 @@ const ExamEditor = () => {
         title: data.title || "",
         description: data.description || "",
         durationMins: data.durationMins || 60,
+        proctoringTier: data.proctoringTier || "full",
         windowStart: data.window?.start
           ? toLocalDateTime(data.window.start)
           : "",
@@ -493,6 +495,7 @@ const ExamEditor = () => {
         title: form.title,
         description: form.description,
         durationMins: Number(form.durationMins),
+        proctoringTier: form.proctoringTier,
         window: {
           start: fromLocalToISO(form.windowStart),
           end: fromLocalToISO(form.windowEnd),
@@ -662,6 +665,7 @@ const ExamEditor = () => {
       title: exam.title || "",
       description: exam.description || "",
       durationMins: exam.durationMins || 60,
+      proctoringTier: exam.proctoringTier || "full",
       windowStart: start,
       windowEnd: end,
       assignment: {
@@ -802,6 +806,20 @@ Points: 5`;
               <p className="help mt-1 text-xs text-slate-500">
                 Total time allowed in minutes.
               </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                AI Proctoring Tier
+              </label>
+              <select
+                className="w-full px-3 py-2 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                value={form.proctoringTier}
+                onChange={(e) => setForm({ ...form, proctoringTier: e.target.value })}
+              >
+                <option value="full">Full AI (Face & Gaze tracking)</option>
+                <option value="snapshot">Snapshot AI (Infrequent checks)</option>
+                <option value="event-only">Event Only (No Face Analytics, disables AI to save compute)</option>
+              </select>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">

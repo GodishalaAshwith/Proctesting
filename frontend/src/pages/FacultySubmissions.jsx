@@ -7,6 +7,7 @@ import {
   grantRetake,
   getExam,
   getMarksheet,
+  verifyHash,
 } from "../utils/api";
 
 const FacultySubmissions = () => {
@@ -433,6 +434,23 @@ const FacultySubmissions = () => {
     }
   };
 
+  const handleVerifyHash = async (attemptId) => {
+    try {
+      const { data } = await verifyHash(attemptId);
+      if (data.verified) {
+        alert("✅ Integrity Verified! The submission data matches the blockchain hash:\n\n" + data.storedHash);
+      } else {
+        alert("❌ INTEGRITY BREACH! The submission data has been tampered with or does not match the stored blockchain hash.");
+      }
+    } catch (e) {
+      alert(
+        e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "Failed to verify hash"
+      );
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
       <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-4 flex-col sm:flex-row">
@@ -490,6 +508,7 @@ const FacultySubmissions = () => {
               <th className="text-left p-3">Student</th>
               <th className="text-left p-3">Status</th>
               <th className="text-left p-3">Score</th>
+              <th className="text-left p-3">Integrity Score</th>
               <th className="text-left p-3">Violations</th>
               <th className="text-left p-3">Actions</th>
             </tr>
@@ -523,6 +542,17 @@ const FacultySubmissions = () => {
                     </td>
                     <td className="p-3">{a.status}</td>
                     <td className="p-3">{a.score}</td>
+                    <td className="p-3">
+                      {a.integrityScore !== undefined ? (
+                        <span className={`px-2 py-1 rounded text-xs font-bold text-white ${
+                          a.integrityScore >= 80 ? 'bg-emerald-500' : a.integrityScore >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}>
+                          {a.integrityScore}/100
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">N/A</span>
+                      )}
+                    </td>
                     <td className="p-3">{a.violationsCount}</td>
                     <td className="p-3">
                       <button
@@ -530,6 +560,13 @@ const FacultySubmissions = () => {
                         onClick={() => viewEvents(a._id)}
                       >
                         View events
+                      </button>
+                      <button
+                        className="ml-3 text-indigo-600 font-bold hover:underline"
+                        onClick={() => handleVerifyHash(a._id)}
+                        title="Verify decentralized blockchain integrity hash"
+                      >
+                       Verify Hash
                       </button>
                       {a.student?._id && (
                         <button

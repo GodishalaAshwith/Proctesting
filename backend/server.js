@@ -4,6 +4,7 @@ import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
+import Exam from "./models/Exam.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
 import examRoutes from "./routes/exams.js";
@@ -51,6 +52,11 @@ io.on("connection", (socket) => {
     socket.to(`exam_${examId}`).emit("faculty:online");
   });
 
+  // When faculty authenticates globally for dashboard alerts
+  socket.on("faculty:authenticate", ({ facultyId }) => {
+    socket.join(`faculty_${facultyId}`);
+  });
+
   // When student joins an exam
   socket.on("student:join", ({ examId, studentId, studentName }) => {
     socket.examId = examId;
@@ -78,13 +84,30 @@ io.on("connection", (socket) => {
   });
 
   // Proctoring violations forwarding
-  socket.on("student:violation", ({ examId, studentId, type }) => {
+  socket.on("student:violation", async ({ examId, studentId, type }) => {
     socket.to(`exam_${examId}_faculty`).emit("student:violation", { studentId, type });
+    
+    // Send global alert to faculty owner
+    try {
+      const exam = await Exam.findById(examId).select("createdBy");
+      if (exam && exam.createdBy) {
+        io.to(`faculty_${exam.createdBy}`).emit("faculty:alert", { studentId, examId, type });
+      }
+    } catch(e) {}
   });
 
   // Settings & Debug config forward
   socket.on("faculty:toggle_autosubmit", ({ examId, enabled }) => {
     socket.to(`exam_${examId}`).emit("config:autosubmit", { enabled });
+  });
+
+  // Remote Proctoring Interventions
+  socket.on("faculty:warning", ({ targetSocketId, message }) => {
+    io.to(targetSocketId).emit("faculty:warning", { message });
+  });
+
+  socket.on("faculty:force_submit", ({ targetSocketId }) => {
+    io.to(targetSocketId).emit("faculty:force_submit");
   });
 
   socket.on("disconnect", () => {

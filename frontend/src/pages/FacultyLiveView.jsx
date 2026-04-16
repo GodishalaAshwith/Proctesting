@@ -88,6 +88,21 @@ const FacultyLiveView = () => {
     }
   };
 
+  const handleIssueWarning = (socketId) => {
+    const msg = window.prompt("Enter warning message for the student:");
+    if (!msg) return;
+    if (socketRef.current) {
+      socketRef.current.emit("faculty:warning", { targetSocketId: socketId, message: msg });
+    }
+  };
+
+  const handleForceSubmit = (socketId) => {
+    if (!window.confirm("Are you sure you want to force submit for this student? This action cannot be undone.")) return;
+    if (socketRef.current) {
+      socketRef.current.emit("faculty:force_submit", { targetSocketId: socketId });
+    }
+  };
+
   useEffect(() => {
     const userStr = localStorage.getItem("user");
     if (!userStr) {
@@ -100,7 +115,7 @@ const FacultyLiveView = () => {
       return;
     }
 
-    const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+    const socket = io(import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000`, {
       transports: ["websocket"],
     });
     socketRef.current = socket;
@@ -314,12 +329,27 @@ const FacultyLiveView = () => {
                      <span className="bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-lg text-lg font-bold text-white shadow-lg border border-slate-700/50">
                        {pinnedStudent.studentName}
                      </span>
-                     <button
-                       onClick={() => setPinnedStudentId(null)}
-                       className="bg-black/50 hover:bg-black/80 backdrop-blur-md p-2 rounded-full text-white transition-colors"
-                     >
-                       <X size={20} />
-                     </button>
+                     <div className="flex gap-2">
+                       <button
+                         onClick={() => handleIssueWarning(pinnedStudent?.socketId)}
+                         className="bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/50 backdrop-blur-md px-3 py-1.5 p-2 text-sm rounded-lg text-amber-300 transition-colors"
+                       >
+                         Send Warning
+                       </button>
+                       <button
+                         onClick={() => handleForceSubmit(pinnedStudent?.socketId)}
+                         className="bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/50 backdrop-blur-md px-3 py-1.5 text-sm rounded-lg text-rose-300 transition-colors cursor-pointer"
+                       >
+                         Force Submit
+                       </button>
+                       <button
+                         onClick={() => setPinnedStudentId(null)}
+                         className="bg-black/50 hover:bg-black/80 backdrop-blur-md p-2 rounded-full text-white transition-colors ml-2"
+                         title="Close Pinned View"
+                       >
+                         <X size={20} />
+                       </button>
+                     </div>
                   </div>
                 </div>
 

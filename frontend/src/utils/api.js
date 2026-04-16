@@ -15,7 +15,7 @@ const normalizeBase = (base) => {
  * Example for Vite: VITE_API_BASE=https://your-backend.onrender.com
  * Example for CRA:  REACT_APP_API_BASE=https://your-backend.onrender.com
  */
-const envBase = import.meta.env?.VITE_API_BASE_URL || "http://localhost:5000";
+const envBase = import.meta.env?.VITE_API_BASE_URL || `http://${window.location.hostname}:5000`;
 
 const API_BASE = normalizeBase(envBase);
 
@@ -112,6 +112,8 @@ export const getAttempt = (attemptId) =>
   API.get(`/attempts/${attemptId}`, localAuthHeader());
 export const logProctorEvent = (attemptId, type, meta) =>
   API.post(`/attempts/${attemptId}/proctor`, { type, meta }, localAuthHeader());
+export const verifyHash = (attemptId) =>
+  API.post(`/attempts/${attemptId}/verify-hash`, {}, localAuthHeader());
 
 /** ---------------- REVIEW / RETAKES ---------------- **/
 export const listAttemptsForExam = (examId) =>

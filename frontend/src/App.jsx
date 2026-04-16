@@ -23,6 +23,7 @@ import StudentProfile from "./pages/StudentProfile";
 import FacultyProfile from "./pages/FacultyProfile";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import FacultyLiveAlerts from "./components/FacultyLiveAlerts";
 import PropTypes from "prop-types";
 
 const PrivateRoute = ({ children }) =>
@@ -51,6 +52,7 @@ function AppShell() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       {!hideNavbar && <Navbar />}
+      <FacultyLiveAlerts />
       <main className="flex-1">
         <Routes>
           <Route path="/" element={<Home />} />

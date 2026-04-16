@@ -61,6 +61,11 @@ const ExamSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    proctoringTier: {
+      type: String,
+      enum: ["full", "snapshot", "event-only"],
+      default: "full"
+    },
   },
   { timestamps: true }
 );

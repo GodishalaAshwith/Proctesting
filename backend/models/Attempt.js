@@ -73,6 +73,8 @@ const AttemptSchema = new mongoose.Schema(
     },
     answers: { type: [AnswerSchema], default: [] },
     score: { type: Number, default: 0 },
+    integrityScore: { type: Number, default: 100 },
+    blockchainHash: { type: String, default: null },
     manualNeeded: { type: Boolean, default: false },
     violations: { type: [ViolationSchema], default: [] },
   },
