@@ -1,14 +1,26 @@
+/**
+ * UPDATED Student.js — Multi-Tenant Version
+ *
+ * Changes from original:
+ *  - Added tenantId (required)
+ *  - rollno unique WITHIN tenant (compound index)
+ *  - email unique WITHIN tenant (compound index)
+ */
 import mongoose from "mongoose";
 
-// Roster of students uploaded by admin. Not used for authentication.
 const StudentSchema = new mongoose.Schema(
   {
-    // University-issued roll number (unique identifier)
-    rollno: { type: String, required: true, unique: true, index: true },
+    rollno: { type: String, required: true, index: true },
     name: { type: String, required: true },
-
-    // Optional contact
     email: { type: String },
+
+    // MULTI-TENANT KEY
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      index: true,
+    },
 
     // Academic profile
     college: { type: String },
@@ -16,12 +28,17 @@ const StudentSchema = new mongoose.Schema(
     department: { type: String },
     section: { type: Number, min: 1, max: 5 },
     semester: { type: Number, min: 1, max: 8 },
-    // Promotion cycle guards to avoid double increments within same cycle
-    // Format: 'YYYY-01' for January cycle, 'YYYY-07' for July cycle
+
+    // Promotion guards
     lastSemCycle: { type: String },
     lastYearCycle: { type: String },
   },
   { timestamps: true }
 );
+
+// CRITICAL: rollno unique per tenant
+StudentSchema.index({ tenantId: 1, rollno: 1 }, { unique: true });
+StudentSchema.index({ tenantId: 1, email: 1 }, { sparse: true });
+StudentSchema.index({ tenantId: 1, department: 1, year: 1, section: 1 });
 
 export default mongoose.model("Student", StudentSchema);

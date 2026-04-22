@@ -1,3 +1,6 @@
+/**
+ * UPDATED ProctoringEvent.js — Multi-Tenant Version
+ */
 import mongoose from "mongoose";
 
 const ProctoringEventSchema = new mongoose.Schema(
@@ -8,19 +11,21 @@ const ProctoringEventSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+
+    // MULTI-TENANT KEY
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      index: true,
+    },
+
     type: {
       type: String,
       enum: [
-        "tab-blur",
-        "visibility-hidden",
-        "fullscreen-exit",
-        "return-timeout",
-        "window-resize",
-        "face-absent",
-        "face-mismatch",
-        "face-multiple",
-        "gaze-away",
-        "gaze-no-face"
+        "tab-blur", "visibility-hidden", "fullscreen-exit",
+        "return-timeout", "window-resize", "face-absent",
+        "face-mismatch", "face-multiple", "gaze-away", "gaze-no-face",
       ],
       required: true,
     },
@@ -29,5 +34,7 @@ const ProctoringEventSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+ProctoringEventSchema.index({ tenantId: 1, attemptId: 1 });
 
 export default mongoose.model("ProctoringEvent", ProctoringEventSchema);

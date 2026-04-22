@@ -1,3 +1,14 @@
+/**
+ * UPDATED App.jsx — Multi-Tenant Version
+ *
+ * Changes:
+ *  - Wrapped in TenantProvider
+ *  - Added SuperAdmin route (/superadmin) with sa_token guard
+ *  - Added TenantAdmin dashboard route (/admin/dashboard)
+ *  - Added /change-password route
+ *  - RoleRoute updated to accept "tenantAdmin"
+ *  - Admin routes accept both "admin" and "tenantAdmin"
+ */
 import {
   BrowserRouter as Router,
   Routes,
@@ -5,6 +16,7 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import { TenantProvider } from "./context/TenantContext";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -24,7 +36,12 @@ import FacultyProfile from "./pages/FacultyProfile";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import FacultyLiveAlerts from "./components/FacultyLiveAlerts";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+import TenantAdminDashboard from "./pages/TenantAdminDashboard";
+import ForceChangePassword from "./pages/ForceChangePassword";
 import PropTypes from "prop-types";
+
+// ─── Auth Guards ──────────────────────────────────────────────────────────────
 
 const PrivateRoute = ({ children }) =>
   localStorage.getItem("token") ? children : <Navigate to="/login" />;
@@ -36,29 +53,58 @@ const RoleRoute = ({ allow, children }) => {
   return allow.includes(user.role) ? children : <Navigate to="/" />;
 };
 
-PrivateRoute.propTypes = {
-  children: PropTypes.node.isRequired,
-};
+// SuperAdmin: uses sa_token, not token
+const SuperAdminRoute = ({ children }) =>
+  localStorage.getItem("sa_token") ? children : <Navigate to="/login" />;
 
+PrivateRoute.propTypes = { children: PropTypes.node.isRequired };
 RoleRoute.propTypes = {
   allow: PropTypes.arrayOf(PropTypes.string).isRequired,
   children: PropTypes.node.isRequired,
 };
+SuperAdminRoute.propTypes = { children: PropTypes.node.isRequired };
+
+// ─── App Shell ────────────────────────────────────────────────────────────────
 
 function AppShell() {
   const location = useLocation();
-  const hideNavbar = location.pathname.startsWith("/attempt/");
-  const hideFooter = location.pathname.startsWith("/attempt/");
+  const hideChrome =
+    location.pathname.startsWith("/attempt/") ||
+    location.pathname.startsWith("/superadmin");
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      {!hideNavbar && <Navbar />}
-      <FacultyLiveAlerts />
+      {!hideChrome && <Navbar />}
+      {!hideChrome && <FacultyLiveAlerts />}
       <main className="flex-1">
         <Routes>
+          {/* ── Public ── */}
           <Route path="/" element={<Home />} />
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route path="/contactus" element={<ContactUs />} />
+
+          {/* ── SuperAdmin ── */}
+          <Route
+            path="/superadmin"
+            element={
+              <SuperAdminRoute>
+                <SuperAdminDashboard />
+              </SuperAdminRoute>
+            }
+          />
+
+          {/* ── Force Password Change ── */}
+          <Route
+            path="/change-password"
+            element={
+              <PrivateRoute>
+                <ForceChangePassword />
+              </PrivateRoute>
+            }
+          />
+
+          {/* ── General Dashboard (role-aware) ── */}
           <Route
             path="/dashboard"
             element={
@@ -67,11 +113,25 @@ function AppShell() {
               </PrivateRoute>
             }
           />
+
+          {/* ── TenantAdmin Panel ── */}
+          <Route
+            path="/admin/dashboard"
+            element={
+              <PrivateRoute>
+                <RoleRoute allow={["tenantAdmin", "admin"]}>
+                  <TenantAdminDashboard />
+                </RoleRoute>
+              </PrivateRoute>
+            }
+          />
+
+          {/* ── Admin (TenantAdmin) Routes ── */}
           <Route
             path="/admin/faculty"
             element={
               <PrivateRoute>
-                <RoleRoute allow={["admin"]}>
+                <RoleRoute allow={["tenantAdmin", "admin"]}>
                   <AdminFaculty />
                 </RoleRoute>
               </PrivateRoute>
@@ -81,7 +141,7 @@ function AppShell() {
             path="/admin/users"
             element={
               <PrivateRoute>
-                <RoleRoute allow={["admin"]}>
+                <RoleRoute allow={["tenantAdmin", "admin"]}>
                   <AdminUsers />
                 </RoleRoute>
               </PrivateRoute>
@@ -91,12 +151,14 @@ function AppShell() {
             path="/admin/students/upload"
             element={
               <PrivateRoute>
-                <RoleRoute allow={["admin"]}>
+                <RoleRoute allow={["tenantAdmin", "admin"]}>
                   <AdminStudentsUpload />
                 </RoleRoute>
               </PrivateRoute>
             }
           />
+
+          {/* ── Faculty Routes ── */}
           <Route
             path="/faculty/exams"
             element={
@@ -157,6 +219,8 @@ function AppShell() {
               </PrivateRoute>
             }
           />
+
+          {/* ── Student Routes ── */}
           <Route
             path="/exams"
             element={
@@ -187,18 +251,23 @@ function AppShell() {
               </PrivateRoute>
             }
           />
+
+          {/* ── Catch-all ── */}
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
-      {!hideFooter && <Footer />}
+      {!hideChrome && <Footer />}
     </div>
   );
 }
 
 function App() {
   return (
-    <Router>
-      <AppShell />
-    </Router>
+    <TenantProvider>
+      <Router>
+        <AppShell />
+      </Router>
+    </TenantProvider>
   );
 }
 

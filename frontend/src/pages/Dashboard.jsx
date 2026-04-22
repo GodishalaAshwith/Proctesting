@@ -47,6 +47,11 @@ const Dashboard = () => {
       return;
     }
     const u = JSON.parse(storedUser);
+    
+    if (u.role === "tenantAdmin") {
+      navigate("/admin/dashboard");
+      return;
+    }
     setUser(u);
     userRef.current = u;
     fetchRoleData(u).finally(() => setLoading(false));
